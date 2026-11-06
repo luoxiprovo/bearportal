@@ -1,0 +1,50 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bearportal_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bearportal_test_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://bearportal_app:bearportal_app@127.0.0.1:5432/bearportal_test_ci
+      MIGRATION_DATABASE_URL: postgres://bearportal:bearportal@127.0.0.1:5432/bearportal_test_ci
+      BEARPORTAL_SUPER_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/bearportal_test_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create database roles
+        run: |
+          node --input-type=module <<'EOF'
+          import pg from "pg";
+          const client = new pg.Client({ connectionString: process.env.BEARPORTAL_SUPER_DATABASE_URL });
+          await client.connect();
+          await client.query("CREATE ROLE bearportal LOGIN PASSWORD 'bearportal' NOSUPERUSER NOBYPASSRLS");
+          await client.query("CREATE ROLE bearportal_app LOGIN PASSWORD 'bearportal_app' NOSUPERUSER NOBYPASSRLS");
+          await client.query("GRANT CONNECT ON DATABASE bearportal_test_ci TO bearportal, bearportal_app");
+          await client.query("ALTER DATABASE bearportal_test_ci OWNER TO bearportal");
+          await client.query("ALTER SCHEMA public OWNER TO bearportal");
+          await client.end();
+          EOF
+      - run: pnpm test

@@ -1,0 +1,5 @@
+{
+  "name": "@bearportal/dns",
+  "private": true,
+  "type": "module"
+}

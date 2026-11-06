@@ -1,0 +1,16 @@
+[Unit]
+Description=BearPortal API
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bearportal
+EnvironmentFile=/etc/bearportal/api.env
+ExecStart=/opt/bearportal/node_modules/.bin/tsx apps/api/src/main.ts
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

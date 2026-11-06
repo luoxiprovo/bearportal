@@ -1,0 +1,5 @@
+{
+  "name": "@bearportal/servers",
+  "private": true,
+  "type": "module"
+}

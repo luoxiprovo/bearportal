@@ -1,0 +1,36 @@
+{
+  "name": "bearportal",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "migrate": "tsx packages/db/src/migrate.ts",
+    "test": "tsx scripts/test.ts",
+    "typecheck": "tsc --noEmit",
+    "start:api": "tsx apps/api/src/main.ts",
+    "trial:prepare": "tsx scripts/local-trial.ts prepare",
+    "trial:migrate": "tsx scripts/local-trial.ts migrate",
+    "trial:reset": "tsx scripts/local-trial.ts reset",
+    "trial:bootstrap": "tsx scripts/local-trial.ts bootstrap",
+    "trial:start": "tsx scripts/local-trial.ts start",
+    "trial:token": "tsx scripts/local-trial.ts token",
+    "trial:walk": "tsx scripts/local-trial.ts walk"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@ai-sdk/harness": "1.0.170",
+    "@ai-sdk/harness-grok-build": "1.0.109",
+    "@types/node": "^22.19.0",
+    "@types/pg": "^8.15.5",
+    "ai": "7.0.159",
+    "jose": "^6.1.0",
+    "pg": "^8.16.3",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2",
+    "zod": "^3.25.76"
+  }
+}

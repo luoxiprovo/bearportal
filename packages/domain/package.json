@@ -1,0 +1,8 @@
+{
+  "name": "@bearportal/domain",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tldts": "^7.0.17"
+  }
+}
