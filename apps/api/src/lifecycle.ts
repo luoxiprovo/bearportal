@@ -65,6 +65,7 @@ type DeploymentRow = {
 };
 
 export type LifecycleContext = {
+  browserAuthEnabled?:boolean;
   withActor: <T>(request: FastifyRequest, mode: "customer" | "operator", fn: (db: Db, actor: Actor) => Promise<T>) => Promise<T>;
   withSystem: <T>(actor: "allocator" | "inventory_worker", fn: (db: Db) => Promise<T>) => Promise<T>;
   demandIdempotency: (request: FastifyRequest) => string;
@@ -300,27 +301,29 @@ export function registerLifecycleRoutes(app: FastifyInstance, ctx: LifecycleCont
   });
 
   app.get("/portal", async (request, reply) => {
-    const view = await ctx.withActor(request, "customer", async (db, actor) => {
+    let view:CustomerPortalView;
+    try { view = await ctx.withActor(request, "customer", async (db, actor) => {
       ctx.requireVerified(actor);
       if (!actor.organizationId) throw new HttpError(422, "ORGANIZATION_REQUIRED", "Create an organization first.");
       return customerView(db, actor.organizationId);
-    });
+    }); } catch(error){if(ctx.browserAuthEnabled&&error instanceof HttpError&&error.status===401)return reply.code(303).header('location','/login?resume=1').send('');throw error;}
     const detected = await detectedDns(ctx, view.domainName);
     reply.type("text/html; charset=utf-8");
-    return reply.send(renderCustomerPortal({ ...view, ...detected }));
+    return reply.send(renderCustomerPortal({ ...view, ...detected, browserAuthEnabled:ctx.browserAuthEnabled }));
   });
 
   app.get("/v1/admin/portal", async (request) => {
     return ctx.withActor(request, "operator", async (db, actor) => {
       ctx.requireVerified(actor);
-      return { ...(await operatorView(db)), requestId: request.id };
+      return { ...(await operatorView(db, actor.roles)), requestId: request.id };
     });
   });
 
   app.get("/operator", async (request, reply) => {
     const html = await ctx.withActor(request, "operator", async (db, actor) => {
       ctx.requireVerified(actor);
-      return renderOperatorPortal(await operatorView(db));
+      const query = request.query as {tab?:string;notice?:string};
+      return renderOperatorPortal({...await operatorView(db, actor.roles),activeTab:query.tab === "users"?"users":query.tab === "brevo"?"brevo":"servers",notice:query.notice});
     });
     reply.type("text/html; charset=utf-8");
     return reply.send(html);
@@ -1075,6 +1078,7 @@ async function detectedDns(
 async function customerView(db: Db, organizationId: string): Promise<CustomerPortalView> {
   const deployment = await db.query<{
     id: string;
+    admin_credentials_available:boolean;
     lifecycle_state: string;
     onboarding_stage: string;
     health_state: string;
@@ -1100,7 +1104,7 @@ async function customerView(db: Db, organizationId: string): Promise<CustomerPor
     nameservers: string[] | null;
     recheck_required: boolean | null;
   }>(
-    `SELECT d.id, d.lifecycle_state, d.onboarding_stage, d.health_state, d.mail_hostname, d.webmail_hostname,
+    `SELECT d.id, (d.admin_secret_ref IS NOT NULL AND d.installer_status IN ('succeeded','tls_pending')) AS admin_credentials_available, d.lifecycle_state, d.onboarding_stage, d.health_state, d.mail_hostname, d.webmail_hostname,
             d.mail_verified, d.domain_id, d.updated_at, d.installer_status, d.dns_writes_accepted,
             d.brevo_authenticated, d.brevo_verified, d.previous_mx, d.published_records, d.brevo_records, d.plan_snapshot,
             s.id AS server_id, s.state AS server_state, host(s.public_ipv4) AS public_ipv4,
@@ -1260,6 +1264,7 @@ async function customerView(db: Db, organizationId: string): Promise<CustomerPor
   const jobRows: ActivityLine[] = jobs.rows.map((item) => ({ kind: item.kind, state: item.state, at: isoTime(item.updated_at) }));
   const eventRows: ActivityLine[] = events.rows.map((item) => ({ kind: item.action, state: "recorded", at: isoTime(item.occurred_at) }));
   return {
+    adminCredentialsAvailable:row?.admin_credentials_available===true,
     onboardingState: onboarding?.state ?? null,
     missingResource: onboarding?.missing_resource ?? null,
     onboardingError: onboarding?.last_error_code ?? null,
@@ -1315,10 +1320,13 @@ async function customerView(db: Db, organizationId: string): Promise<CustomerPor
   };
 }
 
-async function operatorView(db: Db): Promise<OperatorPortalView> {
+async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPortalView> {
   const counts = await db.query<{ state: string; count: number }>("SELECT state, count(*)::int AS count FROM servers GROUP BY state ORDER BY state");
   const servers = await db.query<{
     id: string;
+    version: number;
+    owner_name: string | null;
+    recovery_reserved: boolean;
     state: string;
     label: string;
     public_ipv4: string | null;
@@ -1342,11 +1350,13 @@ async function operatorView(db: Db): Promise<OperatorPortalView> {
     disk_gb: string | null;
     failures: string | null;
   }>(
-    `SELECT s.id, s.state, s.label, host(s.public_ipv4) AS public_ipv4, a.organization_id AS owner_id,
+    `SELECT s.id, s.version, o.name AS owner_name,
+            EXISTS(SELECT 1 FROM recovery_bindings r WHERE r.replacement_server_id=s.id AND r.state='pending') AS recovery_reserved,
+            s.state, s.label, host(s.public_ipv4) AS public_ipv4, a.organization_id AS owner_id,
             s.operator_contact, s.provider_reference, s.profile_code, s.last_heartbeat_at, s.validated_at,
             s.tenant_tainted_at IS NOT NULL AS tainted,
             (SELECT h.state FROM host_identities h WHERE h.server_id = s.id AND h.state <> 'revoked' ORDER BY h.created_at DESC LIMIT 1) AS identity_state,
-            (SELECT h.fingerprint FROM host_identities h WHERE h.server_id = s.id AND h.state <> 'revoked' ORDER BY h.created_at DESC LIMIT 1) AS fingerprint,
+            coalesce((SELECT h.fingerprint FROM host_identities h WHERE h.server_id = s.id AND h.state <> 'revoked' ORDER BY h.created_at DESC LIMIT 1),s.readiness_report->>'hostKeyFingerprint') AS fingerprint,
             s.readiness_report->>'os' AS os,
             s.readiness_report->>'init' AS init,
             s.readiness_report->>'architecture' AS architecture,
@@ -1359,6 +1369,7 @@ async function operatorView(db: Db): Promise<OperatorPortalView> {
             s.readiness_report->>'failures' AS failures
      FROM servers s
      LEFT JOIN server_assignments a ON a.server_id = s.id AND a.released_at IS NULL
+     LEFT JOIN organizations o ON o.id=a.organization_id
      ORDER BY s.created_at`,
   );
   const actions = await db.query<{ code: string }>(
@@ -1371,8 +1382,10 @@ async function operatorView(db: Db): Promise<OperatorPortalView> {
      ORDER BY verified_registered_at, id
      LIMIT 50`,
   );
-  const relays = await db.query<{ id: string; label: string; provider_account_id: string; smtp_login: string; daily_limit: number; state: string; assigned: boolean }>(
-    `SELECT r.id, r.label, r.provider_account_id, r.smtp_login, r.daily_limit, r.state,
+  const relays = await db.query<{ id: string; version: number; archived_at:Date|null; owner_name:string|null; label: string; provider_account_id: string; smtp_login: string; daily_limit: number; state: string; assigned: boolean }>(
+    `SELECT r.id,r.version,r.archived_at,
+            (SELECT o.name FROM relay_assignments a JOIN organizations o ON o.id=a.organization_id WHERE a.relay_connection_id=r.id AND a.released_at IS NULL LIMIT 1) AS owner_name,
+            r.label, r.provider_account_id, r.smtp_login, r.daily_limit, r.state,
             EXISTS (SELECT 1 FROM relay_assignments a WHERE a.relay_connection_id = r.id AND a.released_at IS NULL) AS assigned
      FROM relay_connections r
      ORDER BY r.created_at`,
@@ -1414,14 +1427,41 @@ async function operatorView(db: Db): Promise<OperatorPortalView> {
   const upgrades = await db.query<{ deployment_id: string; state: string }>(
     "SELECT deployment_id, state FROM upgrade_plans ORDER BY created_at DESC LIMIT 20",
   );
+  const users = await db.query<{
+    id:string; email:string|null; email_verified:boolean; status:string; created_at:Date;
+    organization_id:string|null; organization_name:string|null; organization_status:string|null;
+    domains:string|null; server_id:string|null; server_label:string|null; public_ipv4:string|null;
+    relay_id:string|null; relay_label:string|null; relay_account:string|null;
+    lifecycle_state:string|null; onboarding_state:string|null;
+  }>(`SELECT u.id,u.verified_email AS email,u.email_verified,u.status,u.created_at,
+      o.id AS organization_id,o.name AS organization_name,o.status AS organization_status,
+      (SELECT string_agg(d.normalized_name, ', ' ORDER BY d.normalized_name) FROM domains d WHERE d.organization_id=o.id AND d.state <> 'retired') AS domains,
+      s.id AS server_id,s.label AS server_label,host(s.public_ipv4) AS public_ipv4,
+      r.id AS relay_id,r.label AS relay_label,r.provider_account_id AS relay_account,
+      (SELECT d.lifecycle_state FROM deployments d WHERE d.organization_id=o.id ORDER BY d.created_at DESC LIMIT 1) AS lifecycle_state,
+      (SELECT q.state FROM onboarding_requests q WHERE q.organization_id=o.id ORDER BY q.created_at DESC LIMIT 1) AS onboarding_state
+    FROM users u
+    LEFT JOIN organizations o ON o.owner_user_id=u.id
+    LEFT JOIN server_assignments sa ON sa.organization_id=o.id AND sa.released_at IS NULL
+    LEFT JOIN servers s ON s.id=sa.server_id
+    LEFT JOIN relay_assignments ra ON ra.organization_id=o.id AND ra.released_at IS NULL
+    LEFT JOIN relay_connections r ON r.id=ra.relay_connection_id
+    ORDER BY u.created_at DESC,o.created_at DESC`);
   const estimateByServer = new Map(estimates.rows.map((row) => [
     row.server_id,
     `${Number(row.amount_minor)} ${row.currency} ${row.source} ${row.billing_system}`,
   ]));
   return {
+    canManageServers:roles.includes("platform_administrator")||roles.includes("infrastructure_operator"),
+    canManageBrevo:roles.includes("platform_administrator"),
+    canViewBrevo:roles.includes("platform_administrator")||roles.includes("infrastructure_operator"),
+    users:users.rows.map(row=>({id:row.id,email:row.email,emailVerified:row.email_verified,status:row.status,createdAt:isoTime(row.created_at),organizationId:row.organization_id,organizationName:row.organization_name,organizationStatus:row.organization_status,domains:row.domains,serverId:row.server_id,serverLabel:row.server_label,publicIpv4:row.public_ipv4,relayId:row.relay_id,relayLabel:row.relay_label,relayAccount:row.relay_account,lifecycleState:row.lifecycle_state,onboardingState:row.onboarding_state})),
     counts: counts.rows.map((row) => ({ state: row.state, count: Number(row.count) })),
     servers: servers.rows.map((server) => ({
       id: server.id,
+      version: server.version,
+      ownerName: server.owner_name,
+      recoveryReserved: server.recovery_reserved,
       state: server.state,
       publicIpv4: server.public_ipv4,
       label: server.label,
@@ -1446,6 +1486,9 @@ async function operatorView(db: Db): Promise<OperatorPortalView> {
     })),
     relays: relays.rows.map((row) => ({
       id: row.id,
+      version: row.version,
+      archivedAt: isoTime(row.archived_at),
+      ownerName: row.owner_name,
       label: row.label,
       account: row.provider_account_id,
       smtpLogin: row.smtp_login,

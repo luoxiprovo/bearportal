@@ -2,7 +2,7 @@
 
 BearPortal has two trusted DNS publication paths: the customer credential form publishes Brevo verification records, and the remote Bearmail installer publishes mail DNS including MX. The operation gateway's ban on model-requested `dns.write` does not disable those trusted paths.
 
-Provisioning is the customer's MX authorization. It runs dry-run then apply without a second approval. A source install resolves a GitHub main SHA and uses it for that preparation's artifacts. Explicit fixture/release injection is a separate `buildServer` mode with its own release-layout checks.
+Guided setup retains the domain-specific authorization submitted with the DNS credential. The backend provisions automatically and runs dry-run then apply without another approval. The lower-level provision API also records MX authorization. A source install resolves a GitHub main SHA and uses it for that preparation's artifacts. Explicit fixture/release injection is a separate `buildServer` mode with its own release-layout checks.
 
 The source path accepts a stored DNS credential while the domain is pending. The legacy proof/recheck APIs still require their configured read adapters, which are unavailable in normal startup. A saved credential alone does not change the domain's verified state.
 
@@ -23,6 +23,6 @@ Caddy may obtain certificates after apply returns. Verify authoritative/public h
 
 Check both `mail.<domain>` and the deployment's saved Bearmail web UI hostname. New deployments use `bearmail.<domain>`; old deployments can use `webmail.<domain>`. A local resolver can cache the previous address; an explicit-resolution check of the new server is useful evidence but is not proof that every client has updated DNS.
 
-Later certificate issuance does not automatically refresh a saved `tls_pending` result. `mail_verified` remains database-locked false, even if HTTPS works. A complete installation and an active mail service are different claims.
+The onboarding worker checks both HTTPS hostnames against the currently assigned server, including certificate validation. When both return a successful HTTP response, it updates the deployment from `tls_pending` to `succeeded` without reinstalling. Historical installer-run results retain the original outcome. `mail_verified` remains database-locked false, even if HTTPS works. A complete installation and an active mail service are different claims.
 
 See [../BEARMAIL_NONINTERACTIVE_INSTALLER.md](../BEARMAIL_NONINTERACTIVE_INSTALLER.md) and [ssh-install.md](ssh-install.md).

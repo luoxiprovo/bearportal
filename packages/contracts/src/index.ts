@@ -411,3 +411,29 @@ export const stepCompleteSchema = z.object({
 export const usageReportSchema = z.object({
   tokens: z.number().int().nonnegative().nullable(),
 }).strict();
+
+/** Operator inventory edits never accept owner, state, taint or credential-reference overrides. */
+export const serverInventoryPatchSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  label: z.string().trim().min(1).max(120).optional(),
+  operatorContact: z.string().trim().min(3).max(200).optional(),
+  providerReference: z.string().trim().min(1).max(200).nullable().optional(),
+  publicIpv4: z.string().min(7).max(15).optional(),
+}).strict().refine(value => Object.keys(value).length > 1, "Include a field to update.");
+
+export const relayInventoryPatchSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  label: z.string().trim().min(1).max(120).optional(),
+  loginEmail: z.string().trim().email().optional(),
+  smtpLogin: z.string().trim().min(1).max(200).optional(),
+  dailyLimit: z.number().int().positive().max(100000).optional(),
+  apiKey: z.string().min(1).max(400).optional(),
+  smtpKey: z.string().min(1).max(400).optional(),
+  paused: z.boolean().optional(),
+  restore: z.literal(true).optional(),
+}).strict().refine(value => Object.keys(value).length > 1, "Include a field to update.");
+
+export const inventoryRemoveSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  confirm: z.literal(true),
+}).strict();

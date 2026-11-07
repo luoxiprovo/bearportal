@@ -10,7 +10,7 @@ These port settings are operator responsibilities. The SSH readiness probe does 
 
 ## SSH readiness
 
-Install the control-plane public key for `bearportal-control-plane` and configure noninteractive sudo before registration. The API uses port 22, `BatchMode`, `IdentitiesOnly` and a private known-hosts file. First contact can accept a new host key; later connections require a match.
+Install the control-plane public key for `bearadmin` and configure noninteractive sudo before registration. The API uses port 22, `BatchMode`, `IdentitiesOnly` and a private known-hosts file. First contact can accept a new host key; later connections require a match.
 
 The six sudo commands read `uname -s`, `uname -m`, `/proc/1/exe`, `/proc/meminfo`, root filesystem size and names under `/var/lib/stalwart`. A missing data directory passes and is not created. Existing entries or an unreadable directory fail clean-server validation. A directory existing does not prove that it is a separate mount.
 

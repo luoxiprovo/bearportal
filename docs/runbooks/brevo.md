@@ -1,10 +1,10 @@
 # Brevo account inventory and domain verification
 
-The operator prepares Brevo accounts outside BearPortal and stores the account email, REST API key, SMTP login, SMTP key and daily allowance. The REST and SMTP keys are separate encrypted secrets. New rows are inactive; updating the same account email replaces keys while retaining its state. Responses do not expose the keys.
+The operator prepares Brevo accounts outside BearPortal and stores the account email, REST API key, SMTP login, SMTP key and daily allowance. The REST and SMTP keys are separate encrypted secrets. New rows are inactive. The inventory page supports explicit versioned edits; duplicate account emails are rejected. The older account form retains its email-based upsert behavior. Responses do not expose the keys.
 
 ## Working customer form integration
 
-A platform administrator uses `/operator/brevo-account`. The customer then submits a domain through `/portal/domain`. That path can exclusively claim the oldest free inactive account and call Brevo to create/read the domain. If no account is free, the domain can remain saved with a visible wait. Failed requests do not establish authentication or release the assignment.
+A platform administrator uses **Brevo accounts** at `/operator` to add and maintain inventory. The older `/operator/brevo-account` form endpoint remains available for compatibility. The customer then submits a domain through `/portal/domain`. That path can exclusively claim the oldest free inactive account and call Brevo to create/read the domain. If no account is free, the domain can remain saved with a visible wait. Failed requests do not establish authentication or release the assignment.
 
 The customer DNS credential form publishes the returned verification TXT/CNAME set, then calls the Brevo authenticate endpoint and reads the domain. Only actual returned booleans establish `authenticated` and `verified`. It stores the same DNS secret for installation and does not publish MX.
 
@@ -12,9 +12,9 @@ Name.com, Hostinger and GoDaddy credentials are offered when all detected namese
 
 ## Guided setup
 
-The guided domain form detects the provider before running external mail setup. Once the user submits credentials and consents, a persistent onboarding request waits for server and Brevo capacity. The in-process worker claims inventory, creates/reads the Brevo domain, publishes TXT/CNAME verification records, authenticates it and waits for both returned flags to be true before installation. The customer does not enter a Brevo account or API key.
+The guided domain form detects the provider before running external mail setup. The credential form asks once for authorization to verify the domain, authenticate Brevo, update mail routing, install Bearmail and send a setup test email. Once the user submits credentials and consents, a persistent onboarding request waits for server and Brevo capacity. The in-process worker claims inventory, creates/reads the Brevo domain, publishes TXT/CNAME verification records, authenticates it and waits for both returned flags to be true before installation. The customer does not enter a Brevo account or API key.
 
-The status page explains capacity shortages and resumes without another credential submission. Invalid provider/credential responses receive bounded retries and then a visible review state. The worker uses the actual authentication result for provisioning; the older generic interface below remains separate.
+The status page explains capacity shortages and resumes without another credential submission. DNS propagation waits do not exhaust the provider error retry budget. Invalid provider/credential responses receive bounded retries and then a visible review state. Retrying the same authorized domain or replacing its credential retains the original authorization; a different domain requires its own authorization. Infrastructure/installation review states do not ask customers to resubmit a saved credential or authorize each step. The worker uses the actual authentication result for provisioning; the older generic interface below remains separate.
 
 ## Separate generic interfaces
 
@@ -26,6 +26,6 @@ The source-install path can proceed with the saved SMTP login/key without a thre
 
 ## Limits
 
-Exclusive relay-assignment indexes prevent sharing a live account. The row's daily allowance is operator-entered; it is not measured remaining quota. Per-mailbox sender verification and a durable all-interface sending limiter are not established by this control plane. There is no generic relay-rotation route; use the existing operator account form to update its stored keys.
+Exclusive relay-assignment indexes prevent sharing a live account. The row's daily allowance is operator-entered; it is not measured remaining quota. Per-mailbox sender verification and a durable all-interface sending limiter are not established by this control plane. There is no generic relay-rotation route. Use the inventory page to replace keys on unassigned accounts; assigned-account connection changes need a separate maintenance workflow. See [inventory.md](inventory.md) for removal, restoration and permissions.
 
 Sources: [../../packages/providers/brevo/src/index.ts](../../packages/providers/brevo/src/index.ts), [../../apps/api/src/inventory.ts](../../apps/api/src/inventory.ts), [../../apps/api/src/installation.ts](../../apps/api/src/installation.ts).

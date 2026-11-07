@@ -36,7 +36,7 @@ import {
   serverCreateSchema,
   versionedSchema,
 } from "../../../packages/contracts/src/index.ts";
-import { enqueueOnboarding } from "./onboarding-queue.ts";
+import { enqueueOnboarding, requireSetupConsent } from "./onboarding-queue.ts";
 import { HttpError } from "./errors.ts";
 import { mutationsPaused } from "./oversight.ts";
 import {
@@ -868,7 +868,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
     return ctx.withActor(request, "operator", async (db, actor) => {
       assertWriter(actor);
       const rows = await db.query(
-        `SELECT id, label, provider_account_id, smtp_login, daily_limit, state, version
+        `SELECT id, label, provider_account_id, smtp_login, daily_limit, state, version, archived_at
          FROM relay_connections ORDER BY created_at DESC LIMIT 100`,
       );
       return { relays: rows.rows, requestId: request.id };
@@ -1392,9 +1392,6 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
     try {
       const domain = normalizeDomain(domainInput);
       const automatic = formFlag(form, "onboarding");
-      if (automatic && !formFlag(form, "deployConsent")) {
-        return send(400, { error: "Confirm that Bearmail can handle new mail for this domain.", domain });
-      }
       await ctx.withActor(request, "customer", async (db, actor) => {
         ctx.requireVerified(actor);
         ctx.consumeLimit(actor.userId, "credential", 10, 60 * 60 * 1000);
@@ -1404,6 +1401,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
           [actor.organizationId, domain],
         );
         if (!domainRow.rows[0]) throw new HttpError(404, "NOT_FOUND", "Save the company domain first.");
+        if(automatic) await requireSetupConsent(db,actor.organizationId,domainRow.rows[0].id,formFlag(form,"deployConsent"));
       });
       const detected = await detectDomainProvider(ctx, domain);
       if (!detected.detectedProvider) {

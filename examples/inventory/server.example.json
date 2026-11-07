@@ -1,0 +1,14 @@
+{
+  "label": "mail-1",
+  "publicIpv4": "REPLACE_WITH_SERVER_PUBLIC_IPV4",
+  "profileCode": "e2-micro",
+  "operatorContact": "ops@example.com",
+  "providerReference": "your-provider-instance-id",
+  "preparationAttestations": {
+    "osPrepared": true,
+    "storagePrepared": true,
+    "firewallAttested": true,
+    "cleanHost": true,
+    "externalBackup": true
+  }
+}

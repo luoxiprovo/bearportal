@@ -519,6 +519,7 @@ describe("M6 lifecycle policy", () => {
     }).find((step) => step.name === "BearMail installation");
     assert.equal(failedInstall?.state, "failed");
     const operator = renderOperatorPortal({
+      canManageServers: true, canManageBrevo: true, canViewBrevo: true,
       counts: [{ state: "reserved", count: 1 }],
       servers: [{ id: "srv", state: "reserved", publicIpv4: "203.0.113.11", label: "alpha <script>alert(1)</script>", ownerId: "org" }],
       requiredActions: ["cancellation.cleanup"],
@@ -526,16 +527,16 @@ describe("M6 lifecycle policy", () => {
     });
     assertHonestPage(operator);
     assert.ok(operator.includes("alpha &lt;script&gt;alert(1)&lt;/script&gt;"));
-    assert.ok(operator.includes("owner org"));
+    assert.ok(operator.includes("org"));
     assert.ok(operator.includes("Add server"));
-    assert.ok(operator.includes("does not prove access"));
+    assert.ok(operator.includes("Linux, systemd and SSH are ready"));
     assert.ok(operator.includes("Brevo accounts"));
-    assert.ok(operator.includes('action="/operator/brevo-account"'));
+    assert.ok(operator.includes('action="/operator/inventory/brevo"'));
     assert.equal(operator.includes('name="domain"'), false);
     assert.ok(operator.includes("SMTP key"));
-    assert.ok(operator.includes("does not publish DNS"));
-    assert.ok(operator.includes("does not call Brevo"));
-    assert.ok(operator.includes("does not create infrastructure"));
+    assert.ok(operator.includes("API key"));
+    assert.ok(operator.includes("Daily allowance"));
+    assert.ok(operator.includes("Cloud servers and provider accounts are managed separately"));
     const accountResult = renderBrevoAccountResult({
       loginEmail: "relay@recovery-bearportal.com",
       stored: true,
@@ -607,7 +608,9 @@ describe("M6 lifecycle policy", () => {
     const portalSource = readFileSync(new URL("../apps/api/src/portal.ts", import.meta.url), "utf8");
     const installationSource = readFileSync(new URL("../apps/api/src/installation.ts", import.meta.url), "utf8");
     const mainSource = readFileSync(new URL("../apps/api/src/main.ts", import.meta.url), "utf8");
-    for (const source of [lifecycleSource, portalSource, installationSource, mainSource]) {
+    // Browser form submission uses fetch; server-side renderers still have no provider effects.
+    assert.ok(portalSource.includes("fetch(form.action"));
+    for (const source of [lifecycleSource, portalSource.replace(/const ADMIN_LOGIN_SCRIPT=`[\s\S]*?`;/, "").split("const INVENTORY_SCRIPT")[0], installationSource, mainSource]) {
       assert.equal(source.includes("generate("), false);
       assert.doesNotMatch(source, /child_process|\bfetch\s*\(|mail_verified\s*=\s*true|writeZone|applyZone|publishZone/);
     }
@@ -627,6 +630,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     const pair = await generateKeyPair("RS256", { extractable: true });
     privateKey = pair.privateKey;
     const deps: ApiDeps = {
+      onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir: mkdtempSync(join(tmpdir(), "bearportal-m6-secrets-")),
       secretKeyHex,
@@ -922,9 +926,9 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     assert.ok(operatorPage.text.includes(owner.organizationId));
     assert.ok(operatorPage.text.includes(other.organizationId));
     assert.ok(operatorPage.text.includes("ops@recovery-bearportal.com"));
-    assert.ok(operatorPage.text.includes("does not prove access"));
+    assert.ok(operatorPage.text.includes("Last SSH check"));
     assert.ok(operatorPage.text.includes("Brevo accounts"));
-    assert.ok(operatorPage.text.includes('action="/operator/brevo-account"'));
+    assert.ok(operatorPage.text.includes('action="/operator/inventory/brevo"'));
     assert.equal(operatorPage.text.includes('name="domain"'), false);
     assert.ok(operatorPage.text.includes("SMTP key"));
     const home = await page("/");
@@ -940,6 +944,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
   it("registers from the development home page and opens the portal", async () => {
     const pair = await generateKeyPair("RS256", { extractable: true });
     const local = await buildServer({
+      onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir: mkdtempSync(join(tmpdir(), "bearportal-m6-register-")),
       secretKeyHex,

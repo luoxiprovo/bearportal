@@ -1,3 +1,4 @@
+import { readIdentityPlatformConfig, type IdentityPlatformConfig } from "./identity-platform-config.ts";
 const REQUIRED = [
   "DATABASE_URL",
   "BEARPORTAL_SECRET_KEY",
@@ -8,6 +9,7 @@ const REQUIRED = [
 ] as const;
 
 export type ApiConfig = {
+  identityPlatform?: IdentityPlatformConfig;
   databaseUrl: string;
   secretKeyHex: string;
   jwtPublicKeyFile: string;
@@ -45,6 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     throw new Error("PORT is invalid.");
   }
   return {
+    identityPlatform:readIdentityPlatformConfig(env),
     databaseUrl: env.DATABASE_URL ?? "",
     secretKeyHex: env.BEARPORTAL_SECRET_KEY ?? "",
     jwtPublicKeyFile: env.BEARPORTAL_JWT_PUBLIC_KEY_FILE ?? "",

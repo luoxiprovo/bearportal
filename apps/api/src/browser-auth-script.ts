@@ -1,0 +1,28 @@
+/** No Firebase SDK: Google Identity Services plus same-origin Identity Platform broker routes. */
+export const BROWSER_AUTH_SCRIPT = String.raw`(async function(){
+  const panel=document.querySelector('[data-managed-auth]');
+  const logout=document.querySelector('[data-auth-logout]');
+  if(!panel&&!logout)return;
+  const message=panel&&panel.querySelector('[data-auth-message]');
+  const form=panel&&panel.querySelector('[data-auth-form]');
+  const verifyPanel=panel&&panel.querySelector('[data-auth-verification]');
+  let options;
+  function say(text,error=false){if(message){message.textContent=text;message.hidden=false;message.classList.toggle('field-error',error);message.setAttribute('role',error?'alert':'status')}}
+  function busy(value){if(panel){panel.setAttribute('aria-busy',String(value));panel.querySelectorAll('button,input').forEach(element=>element.disabled=value)}if(logout)logout.disabled=value}
+  async function post(path,body){const response=await fetch(path,{method:'POST',headers:{'content-type':'application/json','x-bearportal-auth-csrf':options.csrf},body:JSON.stringify(body),cache:'no-store'});const result=await response.json();if(!response.ok)throw Error(result.error&&result.error.message||'Sign-in could not be completed. Try again.');return result}
+  function result(value){if(value.redirect){location.assign(value.redirect);return}if(value.state==='verify_email'){form.hidden=true;verifyPanel.hidden=false;panel.querySelector('[data-auth-google]').hidden=true;say(value.verificationDeliveryPending?'Your account was created. Verification delivery is delayed; use Resend verification email.':'Check your inbox'+(value.email?' at '+value.email:'')+'. Verify your email, then continue below.');if(form.elements.password)form.elements.password.value=''}}
+  try{
+    const response=await fetch('/auth/options',{cache:'no-store'});options=await response.json();
+    if(!response.ok||!options.configured)throw Error('Account sign-in is not configured yet. Contact the operator.');
+    if(logout){logout.hidden=false;logout.addEventListener('click',async()=>{busy(true);try{const value=await post('/auth/logout',{});location.assign(value.redirect)}catch(error){say(error.message,true);logout.disabled=false}})}
+    if(!panel)return;
+    busy(false);
+    form.addEventListener('submit',async event=>{event.preventDefault();const values=new FormData(form);busy(true);try{result(await post(panel.dataset.authMode==='signup'?'/auth/signup':'/auth/signin',{email:String(values.get('email')).trim(),password:String(values.get('password'))}));}catch(error){say(error.message,true)}finally{busy(false)}});
+    panel.querySelector('[data-auth-reset]').addEventListener('click',async()=>{const email=form.elements.email.value.trim();if(!email){say('Enter your email address first.',true);form.elements.email.focus();return}busy(true);try{const value=await post('/auth/password-reset',{email});say(value.message)}catch(error){say(error.message,true)}finally{busy(false)}});
+    panel.querySelector('[data-auth-verified]').addEventListener('click',async()=>{busy(true);try{const value=await post('/auth/verified',{});if(value.state==='verify_email')say('Your email is not verified yet. Open the verification link in your inbox, then try again.');else result(value)}catch(error){say(error.message,true)}finally{busy(false)}});
+    panel.querySelector('[data-auth-resend]').addEventListener('click',async()=>{busy(true);try{await post('/auth/resend-verification',{});say('Verification email sent. Check your inbox and spam folder.')}catch(error){say(error.message,true)}finally{busy(false)}});
+    if(options.hasRefreshSession){const resume=panel.querySelector('[data-auth-resume]');resume.hidden=false;resume.addEventListener('click',async()=>{busy(true);try{result(await post('/auth/verified',{}))}catch(error){say(error.message,true)}finally{busy(false)}});if(new URLSearchParams(location.search).has('resume'))resume.click()}
+    const loadGoogle=()=>new Promise((resolve,reject)=>{if(window.google&&window.google.accounts){resolve();return}const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=resolve;script.onerror=reject;document.head.appendChild(script)});
+    try{await loadGoogle();window.google.accounts.id.initialize({client_id:options.googleClientId,nonce:options.nonce,auto_select:false,callback:async value=>{busy(true);try{result(await post('/auth/google',{credential:value.credential}))}catch(error){say(error.message,true)}finally{busy(false)}}});window.google.accounts.id.renderButton(panel.querySelector('[data-auth-google]'),{theme:'outline',size:'large',shape:'pill',text:'continue_with',width:Math.min(320,panel.clientWidth)});}catch{panel.querySelector('[data-auth-google]').textContent='Google sign-in could not load. Use email and password or reload.'}
+  }catch(error){say(error.message,true);if(panel)panel.querySelector('[data-auth-google]').textContent='Google sign-in unavailable';busy(true)}
+})();`;

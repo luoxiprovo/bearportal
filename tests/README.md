@@ -17,3 +17,5 @@ Unit tests can be run directly, for example:
 ```sh
 pnpm exec tsx --test tests/database-safety.test.ts tests/inventory-unit.test.ts
 ```
+
+Identity Platform coverage in `browser-auth.test.ts` and `identity-platform.test.ts` uses cryptographically signed test tokens and injected provider adapters in the disposable database. It covers verified registration, Google proof, password/verification/reset/refresh, legacy resource preservation, operator exclusions, CSRF/origin controls and secret redaction. It does not send real verification emails or claim live Google OAuth validation without a configured project.

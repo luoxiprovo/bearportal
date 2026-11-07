@@ -8,7 +8,7 @@ The control-plane defaults are:
 
 | Item | Location/value |
 |---|---|
-| SSH account | `bearportal-control-plane` |
+| SSH account | `bearadmin` |
 | Private key | `/var/lib/bearportal/ssh/id_ed25519` |
 | Known hosts | `/var/lib/bearportal/ssh/known_hosts` |
 | Local work | `/var/lib/bearportal/work/<operationId>` |
@@ -16,13 +16,15 @@ The control-plane defaults are:
 
 The runner's hooks can override local key, known-hosts and work-root paths in an explicitly configured invocation. The normal environment loader does not expose those hook overrides as environment variables.
 
-The API identity needs private local storage and write access to the default work root. The remote account needs noninteractive sudo and a known SSH host key. SSH/SCP use port 22 and argument arrays. A changed host key blocks the session.
+The API identity needs private local storage and write access to the default work root. Startup creates/checks that directory and fails if access is unavailable. The remote account needs noninteractive sudo and a known SSH host key. SSH/SCP use port 22 and argument arrays. A changed host key blocks the session.
 
 The remote operation directory is mode `0700` and owned by the SSH login for uploads. Credentials/input are `0600`; the installer is `0700`; staged release executables are `0755`. The remote filesystem must allow execution of both the script and engine artifact. Using `/run` caused a real `noexec` failure; it has been replaced with disk staging.
 
-The guided browser flow submits a persistent onboarding request and runs this sequence in the API’s background queue after Brevo authentication. It retries capacity waits every 30 seconds and does not require the customer to call deployment APIs manually. The sequence below also describes the lower-level provision API. Apply migration `006_onboarding.sql` before using the new flow.
+The guided browser flow submits a persistent onboarding request and runs this sequence in the API’s background queue after Brevo authentication. It retries capacity waits every 30 seconds and does not require the customer to call deployment APIs manually. The sequence below also describes the lower-level provision API. Apply all migrations before using the flow; migrations 006, 007 and 008 add onboarding, inventory archival and identity-account bindings.
 
 ## Provisioning sequence
+
+The guided worker creates/provisions the deployment using the authorization already saved with the domain credential. These API calls describe its lower-level implementation; customers do not need to invoke them or approve each stage.
 
 1. Create the deployment and submit `POST /v1/deployments/:id/provision` with version and idempotency key. This authorizes MX replacement.
 2. Check the saved server/assignment, selected plan, stored DNS credential and relay. On the source path, the domain can still be pending and a compatible saved Brevo TXT set is optional.

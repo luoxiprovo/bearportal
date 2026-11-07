@@ -1,3 +1,5 @@
+import { refreshInstalledTls, type InstalledTlsProbe } from "./installed-tls.ts";
+import { refreshWaitingInventory } from "./refresh-inventory.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { dnsCredentialSchema } from "../../../packages/contracts/src/index.ts";
@@ -10,7 +12,7 @@ import {
   ensureAdminSecret,
   type InstallationContext,
 } from "./installation.ts";
-import { enqueueOnboarding } from "./onboarding-queue.ts";
+import { enqueueOnboarding, requireSetupConsent } from "./onboarding-queue.ts";
 import { HttpError } from "./errors.ts";
 
 /** A small persistent onboarding queue. All execution reuses the API's tenant/installer services. */
@@ -19,6 +21,7 @@ export function registerOnboarding(
   inventory: InventoryContext,
   install: InstallationContext,
   intervalMs = 30_000,
+  tlsProbe?: InstalledTlsProbe,
 ) {
   let active: Promise<boolean> | null = null;
   let currentOrganization: string | null = null;
@@ -28,7 +31,7 @@ export function registerOnboarding(
     if (stopping) return Promise.resolve(false);
     if (active) return active;
     active = processOne()
-      .catch(async () => {
+      .catch(async (error) => {
         if (currentOrganization) {
           await inventory
             .withSystem("inventory_worker", async (db) => {
@@ -45,7 +48,9 @@ export function registerOnboarding(
             })
             .catch(() => undefined);
         }
+        const code=(error as {code?:unknown})?.code;
         app.log.error(
+          {failureCode:typeof code==='string'&&/^[0-9A-Z]{5}$/.test(code)?code:'INTERNAL'},
           "Automatic onboarding attempt failed; the persisted request will be checked again.",
         );
         return false;
@@ -74,12 +79,6 @@ export function registerOnboarding(
 
   app.post("/portal/onboarding", async (request, reply) => {
     const form = request.body as Record<string, string> | undefined;
-    if (form?.deployConsent !== "1")
-      throw new HttpError(
-        400,
-        "CONSENT_REQUIRED",
-        "Confirm the mail-routing change before continuing.",
-      );
     await inventory.withActor(request, "customer", async (db, actor) => {
       inventory.requireVerified(actor);
       if (!actor.organizationId)
@@ -96,6 +95,12 @@ export function registerOnboarding(
           "DNS_CREDENTIAL_REQUIRED",
           "Connect your domain provider first.",
         );
+      await requireSetupConsent(
+        db,
+        actor.organizationId,
+        domain.rows[0].id,
+        form?.deployConsent === "1",
+      );
       await enqueueOnboarding(db, actor.organizationId, domain.rows[0].id);
     });
     wake();
@@ -125,6 +130,8 @@ export function registerOnboarding(
   });
 
   async function processOne(): Promise<boolean> {
+    await refreshInstalledTls(inventory,tlsProbe);
+    await refreshWaitingInventory(inventory);
     const request = { id: randomUUID() } as FastifyRequest;
     const prepared = await inventory.withSystem(
       "inventory_worker",
@@ -309,6 +316,11 @@ export function registerOnboarding(
             ],
           );
           if (auth.authenticated !== true || auth.verified !== true) {
+            // Valid provider responses awaiting DNS are progress, not credential failures.
+            await db.query(
+              "UPDATE onboarding_requests SET attempts=0 WHERE organization_id=$1",
+              [item.organization_id],
+            );
             await defer("queued", "DNS_PROPAGATION");
             return null;
           }
@@ -425,28 +437,62 @@ export function registerOnboarding(
           `onboarding-install-${prepared.deployment.id}-${prepared.deployment.version}`,
         );
         const accepted = result.body.dnsWritesAccepted === true;
+        const failure = result.body.error as
+          { code?: string; retryable?: boolean } | undefined;
+        const retryable = !accepted && failure?.retryable === true;
         await inventory.setActor(db, "platform_administrator");
         await db.query(
-          `UPDATE onboarding_requests SET state=$2,last_error_code=$3,lease_expires_at=NULL,updated_at=now() WHERE organization_id=$1`,
+          `UPDATE onboarding_requests SET state=$2,last_error_code=$3,lease_expires_at=NULL,next_attempt_at=now()+interval '60 seconds',updated_at=now() WHERE organization_id=$1`,
           [
             prepared.item.organization_id,
-            accepted ? "installed" : "attention",
-            accepted ? null : "INSTALLATION_REVIEW_REQUIRED",
+            accepted ? "installed" : retryable ? "queued" : "attention",
+            accepted ? null : (failure?.code ?? "INSTALLATION_REVIEW_REQUIRED"),
           ],
         );
+        if (accepted)
+          await db.query(
+            "UPDATE required_actions SET state='resolved',resolved_at=now() WHERE organization_id=$1 AND state='open' AND code LIKE 'onboarding.%'",
+            [prepared.item.organization_id],
+          );
       });
-    } catch {
+    } catch (error) {
+      const localError = error as {
+        code?: string;
+        path?: string;
+        syscall?: string;
+      };
+      const storageFailure =
+        localError?.code === "EACCES" &&
+        localError.path === "/var/lib/bearportal/work" &&
+        ["mkdir", "chmod"].includes(localError.syscall ?? "");
+      app.log.error(
+        {
+          failureCode: storageFailure
+            ? "INSTALLER_STORAGE_UNAVAILABLE"
+            : error instanceof HttpError
+              ? error.code
+              : "INSTALLATION_REVIEW_REQUIRED",
+        },
+        "Automatic installation could not complete.",
+      );
       await inventory.withSystem("inventory_worker", async (db) => {
         await inventory.setActor(db, "platform_administrator");
         await db.query(
-          `UPDATE onboarding_requests SET state='attention',last_error_code='INSTALLATION_REVIEW_REQUIRED',lease_expires_at=NULL,updated_at=now() WHERE organization_id=$1`,
-          [prepared.item.organization_id],
+          `UPDATE onboarding_requests SET state=$2,last_error_code=$3,lease_expires_at=NULL,next_attempt_at=now()+interval '60 seconds',updated_at=now() WHERE organization_id=$1`,
+          [
+            prepared.item.organization_id,
+            storageFailure ? "queued" : "attention",
+            storageFailure
+              ? "INSTALLER_STORAGE_UNAVAILABLE"
+              : "INSTALLATION_REVIEW_REQUIRED",
+          ],
         );
-        await recordReview(
-          db,
-          prepared.item.organization_id,
-          "INSTALLATION_REVIEW_REQUIRED",
-        );
+        if (!storageFailure)
+          await recordReview(
+            db,
+            prepared.item.organization_id,
+            "INSTALLATION_REVIEW_REQUIRED",
+          );
       });
     }
     return true;

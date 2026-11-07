@@ -8,7 +8,7 @@ The operator creates and maintains the machine, disks, firewall and external bac
 2. Use x86-64 for the normal download path. The SSH probe accepts arm64, but the downloaded engine validator currently rejects non-x86-64 binaries.
 3. Provide at least 20 GiB total root-filesystem capacity. The SSH probe accepts reported memory of at least 900 MiB to accommodate nominal 1 GiB machines. It does not measure a production workload or prove sufficient free space.
 4. Leave `/var/lib/stalwart` missing or empty of unrelated mail data. There is no requirement to mount it separately. Dry-run does not create it; apply creates it if missing. BearPortal does not format, partition or resize storage.
-5. Create `bearportal-control-plane`, install the control-plane SSH public key in its authorized keys, and configure passwordless sudo for the required operations. Keep the private key on the control plane.
+5. Create `bearadmin`, install the control-plane SSH public key in its authorized keys, and configure passwordless sudo for the required operations. Keep the private key on the control plane.
 6. Configure the firewall in [enrollment.md](enrollment.md). Arrange backups outside BearPortal.
 7. Ensure `/var/lib/bearportal/install` is on an executable filesystem with sufficient space for the staged release. `/run` may be `noexec` and is not used.
 

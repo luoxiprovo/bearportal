@@ -5,7 +5,7 @@ import { RELEASE_FILES } from "./installer.ts";
 const OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Login account on every mail server. The control-plane private key stays local. */
-export const SSH_LOGIN_USER = "bearportal-control-plane";
+export const SSH_LOGIN_USER = "bearadmin";
 
 export type SshEndpoint = {
   host: string;

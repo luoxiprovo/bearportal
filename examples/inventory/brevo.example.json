@@ -1,0 +1,8 @@
+{
+  "label": "Brevo account 1",
+  "loginEmail": "your-brevo-login@example.com",
+  "apiKey": "REPLACE_WITH_BREVO_API_KEY",
+  "smtpLogin": "REPLACE_WITH_BREVO_SMTP_LOGIN",
+  "smtpKey": "REPLACE_WITH_BREVO_SMTP_KEY",
+  "dailyLimit": 300
+}

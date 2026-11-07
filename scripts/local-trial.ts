@@ -1,3 +1,6 @@
+import { configureIdentity } from "./configure-identity.ts";
+import { runInventory, inventoryHelp } from "./inventory-cli.ts";
+import { createDevelopmentLogin } from "../apps/api/src/development-login.ts";
 import { spawn } from "node:child_process";
 import {
   createHash,
@@ -57,9 +60,12 @@ function main(): Promise<void> {
   if (command === "reset") return resetCommand();
   if (command === "bootstrap") return bootstrapCommand();
   if (command === "start") return Promise.resolve(start());
+  if (command === "auth-configure") return configureIdentity(envFile,process.argv.slice(3));
+  if (command === "inventory") return inventoryCommand();
+  if (command === "login") return loginCommand();
   if (command === "token") return tokenCommand();
   if (command === "walk") return walk();
-  console.error("Usage: tsx scripts/local-trial.ts prepare|migrate|reset|bootstrap|start|token|walk");
+  console.error("Usage: tsx scripts/local-trial.ts prepare|migrate|reset|bootstrap|start|login|inventory|auth-configure|token|walk");
   process.exit(1);
 }
 
@@ -187,6 +193,23 @@ function start(): void {
   child.on("exit", (code) => {
     process.exit(code ?? 1);
   });
+}
+
+async function inventoryCommand(): Promise<void> {
+  const args=process.argv.slice(3);
+  if(!args.length || args.includes('--help')) { console.log(inventoryHelp);return; }
+  const env=loadTrialEnv();assertDevelopment(env);
+  const token=await signToken(env,env.BOOTSTRAP_ADMIN_SUBJECT,env.BOOTSTRAP_ADMIN_EMAIL,["pwd","totp"]);
+  console.log(await runInventory(args,{origin:env.BEARPORTAL_API_ORIGIN,token}));
+}
+
+async function loginCommand(): Promise<void> {
+  const env = loadTrialEnv();
+  assertDevelopment(env);
+  const token = await signToken(env, env.BOOTSTRAP_ADMIN_SUBJECT, env.BOOTSTRAP_ADMIN_EMAIL, ["pwd", "totp"]);
+  const code = createDevelopmentLogin(token);
+  console.log(`http://localhost:8088/operator/login#${code}`);
+  console.log("Open this private link on your Mac through the SSH tunnel. It expires in 5 minutes and works once.");
 }
 
 async function tokenCommand(): Promise<void> {

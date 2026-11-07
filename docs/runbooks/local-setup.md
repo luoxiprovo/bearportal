@@ -2,7 +2,7 @@
 
 Follow [../try-it.md](../try-it.md) for development startup. Configuration names are in [../../.env.example](../../.env.example); runtime validation is in [../../apps/api/src/config.ts](../../apps/api/src/config.ts).
 
-`main.ts` loads the application database URL, encryption key, JWT public key/issuer/audience, secret directory, bind address and port. The migration command separately uses `MIGRATION_DATABASE_URL`. Development registration also needs the generated private signing key and test-issuer flag. Production rejects the test issuer.
+`main.ts` loads the application database URL, encryption key, JWT public key/issuer/audience, secret directory, bind address and port. The migration command separately uses `MIGRATION_DATABASE_URL`. Managed signup also reads the Identity Platform project/API key/OAuth client/origin settings; configure them using `pnpm auth:configure` and [identity-platform.md](identity-platform.md). Email-only development registration and operator login links need the generated private signing key and test-issuer flag. Production rejects the test issuer.
 
 Normal startup provides live SSH probing and the live installer runner, plus the Brevo account-form and DNS publishing functions. Development startup is therefore capable of real external changes. Fake DNS, relay, Brevo and installer adapters are injected by automated tests rather than selected automatically by development mode.
 

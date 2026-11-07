@@ -1,0 +1,6 @@
+{
+  "projectId": "<GOOGLE_CLOUD_PROJECT_ID>",
+  "apiKey": "<IDENTITY_PLATFORM_API_KEY>",
+  "googleClientId": "<GOOGLE_OAUTH_WEB_CLIENT_ID>.apps.googleusercontent.com",
+  "origins": ["http://localhost:8088", "http://127.0.0.1:8088"]
+}

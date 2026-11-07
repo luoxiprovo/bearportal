@@ -11,7 +11,7 @@ sudo -n -- <remoteDir>/bearmail-install --dry-run --input <remoteDir>/input.json
 sudo -n -- <remoteDir>/bearmail-install --input <remoteDir>/input.json --result <remoteDir>/result.json
 ```
 
-`remoteDir` is `/var/lib/bearportal/install/<operationId>`. The SSH login is `bearportal-control-plane`, and stdin is closed. The filesystem must permit execution of the installer and staged engine binary. `/run` may be `noexec` and is not the staging location.
+`remoteDir` is `/var/lib/bearportal/install/<operationId>`. The SSH login is `bearadmin`, and stdin is closed. The filesystem must permit execution of the installer and staged engine binary. `/run` may be `noexec` and is not the staging location.
 
 The control plane resolves one GitHub `main` SHA for a preparation and downloads these files at that SHA:
 

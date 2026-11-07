@@ -1,7 +1,14 @@
+import { registerBrowserAuth } from "./browser-auth.ts";
+import { createIdentityPlatformClient, validatePlatformClaims, type IdentityPlatformClient } from "./identity-platform-client.ts";
+import type { IdentityPlatformConfig } from "./identity-platform-config.ts";
+import { resolveIdentitySubject } from "./identity-accounts.ts";
+import type { InstalledTlsProbe } from "./installed-tls.ts";
+import { registerAdminCredentials } from "./admin-credentials.ts";
+import { registerDevelopmentLogin } from "./development-login.ts";
 import { createHmac, randomUUID, createHash } from "node:crypto";
 import { hostname } from "node:os";
 import Fastify, { LogController, type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { importSPKI, jwtVerify, type JWTPayload } from "jose";
+import { decodeJwt, importSPKI, jwtVerify, type JWTPayload } from "jose";
 import pg from "pg";
 import { ZodError } from "zod";
 import {
@@ -31,6 +38,7 @@ import { liveMailInstall, resolveBearmailCommit, type MailInstallHooks } from ".
 import type { SshProbeOutcome } from "../../../packages/servers/src/ssh-probe.ts";
 import { HttpError } from "./errors.ts";
 import { registerInstallationRoutes, repairAssignedAddress, type InstallationContext } from "./installation.ts";
+import { registerOperatorInventory } from "./operator-inventory.ts";
 import { registerOnboarding } from "./onboarding.ts";
 import { registerInventoryRoutes, type InventoryContext } from "./inventory.ts";
 import { registerLifecycleRoutes } from "./lifecycle.ts";
@@ -44,10 +52,13 @@ const OPERATOR_ROLES = ["support", "infrastructure_operator", "platform_administ
 type OperatorRole = (typeof OPERATOR_ROLES)[number];
 
 export type ApiDeps = {
+  identityPlatform?:IdentityPlatformConfig;
+  identityPlatformClient?:IdentityPlatformClient;
   lookupNameservers?: typeof defaultLookupNameservers;
   publishBrevoRecords?: typeof defaultPublishBrevoRecords;
   resolveInstallerCommit?: () => Promise<string>;
   onboardingIntervalMs?: number;
+  installedTlsProbe?: InstalledTlsProbe;
   databaseUrl: string;
   secretsDir: string;
   secretKeyHex: string;
@@ -102,6 +113,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
   const installFromSource = deps.mailInstall && !deps.installerRunner && !deps.release
     ? { resolveCommit: deps.resolveInstallerCommit ?? (() => resolveBearmailCommit()) }
     : undefined;
+  const identityClient=deps.identityPlatform?(deps.identityPlatformClient??createIdentityPlatformClient(deps.identityPlatform)):undefined;
   const rateHits = new Map<string, number[]>();
   const app = Fastify({
     logger: {
@@ -157,7 +169,8 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
   app.get("/healthz", async (request) => ({ ok: true, requestId: request.id }));
 
   const homeState = (extra: HomeState = {}): HomeState => ({
-    mode: deps.devJwtPrivateKeyPem ? "development" : "identity",
+    mode: deps.identityPlatform ? "identity" : deps.devJwtPrivateKeyPem ? "development" : "identity",
+    managedAuth: Boolean(deps.identityPlatform),
     ...extra,
   });
 
@@ -168,7 +181,10 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
 
   app.get("/", async (_request, reply) => sendHome(reply, 200));
 
+  registerDevelopmentLogin(app, Boolean(deps.devJwtPrivateKeyPem));
+
   app.get("/register", async (_request, reply) => sendHome(reply, 200));
+  app.get("/login", async (_request, reply) => sendHome(reply, 200, {authMode:"signin"}));
 
   app.post("/register", async (request, reply) => {
     const form = request.body as Record<string, string> | undefined;
@@ -179,7 +195,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
       return again(400, "Enter your email address.");
     }
     if (organization.length > 120) return again(400, "Enter an organization name.");
-    if (!deps.devJwtPrivateKeyPem) {
+    if (!deps.devJwtPrivateKeyPem || deps.identityPlatform) {
       return again(403, "This server registers accounts through Identity Platform. Browser registration is available on the development server.");
     }
     try {
@@ -270,9 +286,11 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     if (!body || typeof body.idToken !== "string") {
       throw new HttpError(400, "VALIDATION", "An identity token is required.");
     }
-    const actor = await authenticateToken(body.idToken, publicKey, deps, pool);
+    let incoming:JWTPayload;try{incoming=decodeJwt(body.idToken)}catch{throw new HttpError(401,"UNAUTHENTICATED","Sign in is required.");}
+    if(deps.identityPlatform&&incoming.iss===`https://securetoken.google.com/${deps.identityPlatform.projectId}`)throw new HttpError(403,"USE_BROWSER_SIGN_IN","Use Google or email/password sign-in to start a browser session.");
+    const actor = await verifiedPayload(body.idToken);
     reply.header("set-cookie", sessionCookie(body.idToken));
-    return { ok: true, requestId: request.id, email: actor.email, emailVerified: actor.emailVerified };
+    return { ok: true, requestId: request.id, email: actor.email, emailVerified: actor.email_verified===true };
   });
 
   function demandIdempotency(request: FastifyRequest): string {
@@ -283,13 +301,24 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     return key;
   }
 
+  async function verifiedPayload(token:string):Promise<JWTPayload&{email:string}> {
+    let raw:JWTPayload;try{raw=decodeJwt(token)}catch{throw new HttpError(401,"UNAUTHENTICATED","Sign in is required.");}
+    if(deps.identityPlatform&&identityClient&&(raw.iss===`https://securetoken.google.com/${deps.identityPlatform.projectId}`||!deps.devJwtPrivateKeyPem)){
+      const claims=validatePlatformClaims(await identityClient.verify(token),deps.identityPlatform);
+      const subject=await resolveIdentitySubject(inventoryContext,claims);
+      return {...claims,sub:subject};
+    }
+    try{const {payload}=await jwtVerify(token,publicKey,{issuer:deps.issuer,audience:deps.audience,algorithms:['RS256']});if(typeof payload.sub!=='string'||typeof payload.email!=='string')throw Error();return payload as JWTPayload&{email:string};}
+    catch{throw new HttpError(401,"UNAUTHENTICATED","Sign in is required.");}
+  }
+
   async function actorFrom(request: FastifyRequest): Promise<JWTPayload & { email: string }> {
     if (usesCookie(request) && request.method !== "GET" && !csrfAccepted(request)) {
       throw new HttpError(403, "CSRF", "A CSRF header is required for cookie sessions.");
     }
     const token = bearer(request) ?? cookieToken(request);
     if (!token) throw new HttpError(401, "UNAUTHENTICATED", "Sign in is required.");
-    const { payload } = await jwtVerify(token, publicKey, { issuer: deps.issuer, audience: deps.audience });
+    const payload = await verifiedPayload(token);
     if (typeof payload.sub !== "string" || typeof payload.email !== "string") {
       throw new HttpError(401, "UNAUTHENTICATED", "The identity token is missing a subject or email.");
     }
@@ -386,8 +415,8 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     if (!actor.emailVerified) throw new HttpError(403, "EMAIL_UNVERIFIED", "Verify your email before changing the account.");
   }
 
-  function requireMfa(actor: Actor): void {
-    const fresh = actor.authTime > 0 && Math.floor(Date.now() / 1000) - actor.authTime <= MFA_WINDOW_SECONDS;
+  function requireMfa(actor: Actor, windowSeconds = MFA_WINDOW_SECONDS): void {
+    const fresh = actor.authTime > 0 && Math.floor(Date.now() / 1000) - actor.authTime <= windowSeconds;
     if (!actor.amr.includes("totp") || !fresh) {
       throw new HttpError(403, "MFA_REQUIRED", "A recent authenticator confirmation is required.");
     }
@@ -808,7 +837,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     withSystem,
     demandIdempotency,
     requireVerified,
-    requireMfa,
+    requireMfa: (actor) => requireMfa(actor, 2 * 60 * 60),
     consumeLimit: (actorId, bucket, limit, windowMs) => consumeLimit(rateHits, actorId, bucket, limit, windowMs),
     replay: (db, principalId, route, key, body) => replay(db, principalId, route, key, body, deps.secretKeyHex),
     remember: (db, principalId, route, key, body, status, response) => remember(db, principalId, route, key, body, status, response, deps.secretKeyHex),
@@ -843,6 +872,9 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     }, db, input),
   };
   registerInventoryRoutes(app, inventoryContext);
+  registerOperatorInventory(app, inventoryContext);
+  registerAdminCredentials(app, inventoryContext);
+  registerBrowserAuth(app,inventoryContext,deps.identityPlatform,identityClient,deps.secretKeyHex);
 
   const installationContext: InstallationContext = {
     withActor,
@@ -864,7 +896,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     schedulerToken: deps.schedulerToken,
   };
   registerInstallationRoutes(app, installationContext);
-  inventoryContext.onboardingRequested = registerOnboarding(app, inventoryContext, installationContext, deps.onboardingIntervalMs ?? 30_000);
+  inventoryContext.onboardingRequested = registerOnboarding(app, inventoryContext, installationContext, deps.onboardingIntervalMs ?? 30_000, deps.installedTlsProbe);
 
   registerOversightRoutes(app, {
     withActor,
@@ -879,6 +911,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
   });
 
   registerLifecycleRoutes(app, {
+    browserAuthEnabled:Boolean(deps.identityPlatform),
     withActor,
     withSystem,
     demandIdempotency,
@@ -1121,10 +1154,4 @@ export async function bootstrapAdmin(databaseUrl: string, subject: string, email
 
 export function controlPlaneHostname(): string {
   return hostname();
-}
-
-async function authenticateToken(token: string, publicKey: CryptoKey, deps: ApiDeps, _pool: pg.Pool) {
-  const { payload } = await jwtVerify(token, publicKey, { issuer: deps.issuer, audience: deps.audience });
-  if (typeof payload.email !== "string") throw new HttpError(401, "UNAUTHENTICATED", "The identity token has no email.");
-  return { email: payload.email, emailVerified: payload.email_verified === true };
 }

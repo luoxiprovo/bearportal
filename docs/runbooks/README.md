@@ -9,6 +9,7 @@ These procedures describe the current code. They do not imply that every lifecyc
 | Prepare a mail server | [preparation.md](preparation.md) |
 | SSH readiness and legacy enrollment | [enrollment.md](enrollment.md) |
 | Install over SSH | [ssh-install.md](ssh-install.md) |
+| Google and email/password authentication | [identity-platform.md](identity-platform.md) |
 | Inventory and reservations | [inventory.md](inventory.md) |
 | Brevo inventory and domain verification | [brevo.md](brevo.md) |
 | DNS results and TLS | [installer-dns.md](installer-dns.md) |

@@ -73,6 +73,12 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       },
     ],
   });
+  let httpsReady = false;
+  let installedAdminPassword = "";
+  let failLocalStorageOnce = false;
+  let sshChecks = 0;
+  let sshReady = false;
+  let changeDuringProbe = false;
   const deps: ApiDeps = {
     databaseUrl,
     secretsDir: mkdtempSync(join(tmpdir(), "bearportal-onboarding-")),
@@ -83,6 +89,34 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     audience,
     schedulerToken: "onboarding-test-scheduler",
     onboardingIntervalMs: 0,
+    installedTlsProbe: async () => httpsReady,
+    sshProbe: async () => {
+      sshChecks++;
+      if (changeDuringProbe) {
+        changeDuringProbe = false;
+        await query(
+          "UPDATE servers SET label='edited during check',version=version+1 WHERE public_ipv4='8.8.4.4'",
+        );
+      }
+      return sshReady
+        ? {
+            ok: true,
+            failures: [],
+            report: {
+              source: "ssh",
+              os: "Linux",
+              architecture: "x64",
+              init: "systemd",
+              memoryMb: 1024,
+              diskGb: 30,
+              dataPathMounted: false,
+              priorTenantData: false,
+              reachable: true,
+              hostKeyFingerprint: "SHA256:test",
+            },
+          }
+        : { ok: false, failures: ["server.ssh_auth_failed"], report: null };
+    },
     lookupNameservers: async () => [
       "ns01.domaincontrol.com",
       "ns02.domaincontrol.com",
@@ -108,6 +142,17 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     resolveInstallerCommit: async () => "a".repeat(40),
     mailInstall: (hooks) => ({
       run: async ({ mode, input }) => {
+        if (failLocalStorageOnce) {
+          failLocalStorageOnce = false;
+          throw Object.assign(
+            new Error("Local installer storage unavailable"),
+            {
+              code: "EACCES",
+              path: "/var/lib/bearportal/work",
+              syscall: "mkdir",
+            },
+          );
+        }
         calls.push(mode);
         assert.equal(input.webmailHostname, "bearmail.company.site");
         assert.equal(input.mailHostname, "mail.company.site");
@@ -116,6 +161,7 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
           await hooks.readSecret(String(input.adminCredentialFile).slice(7)),
         );
         assert.equal(secret.username, "admin@company.site");
+        installedAdminPassword = secret.password;
         assert.ok(
           secret.password.length >= 12,
           "new admin secret must be committed before the live runner reads it",
@@ -208,6 +254,35 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       cookie,
     );
     assert.equal(accepted.statusCode, 303);
+    const originalConsent = (
+      await query("SELECT consented_at::text FROM onboarding_requests")
+    )[0][0];
+    const resumeWithoutConsent = await form(
+      "/portal/onboarding",
+      { csrf: "1" },
+      cookie,
+    );
+    assert.equal(resumeWithoutConsent.statusCode, 303);
+    const replaceWithoutConsent = await form(
+      "/portal/dns-credential",
+      {
+        csrf: "1",
+        onboarding: "1",
+        domain: "company.site",
+        dnsToken: credentials,
+      },
+      cookie,
+    );
+    assert.equal(
+      replaceWithoutConsent.statusCode,
+      303,
+      replaceWithoutConsent.body,
+    );
+    assert.equal(
+      (await query("SELECT consented_at::text FROM onboarding_requests"))[0][0],
+      originalConsent,
+      "retry and credential replacement retain the original authorization",
+    );
     await run();
     assert.equal(
       (
@@ -224,14 +299,73 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     // Capacity arrives later; no customer re-submission is needed.
     const serverId = randomUUID();
     await query(
-      `INSERT INTO servers(id,label,public_ipv4,profile_code,operator_contact,state,validated_at,available_since,readiness_report) VALUES(${sql(serverId)},'test-capacity','8.8.4.4','e2-micro','ops@example.org','available',now(),now(),'{"source":"ssh"}')`,
+      `INSERT INTO servers(id,label,public_ipv4,profile_code,operator_contact,state,validated_at,available_since,readiness_report) VALUES(${sql(serverId)},'test-capacity','8.8.4.4','e2-micro','ops@example.org','available',now()-interval '10 minutes',now()-interval '10 minutes','{"source":"ssh"}')`,
+    );
+    await due();
+    await run();
+    assert.equal(sshChecks, 1);
+    assert.equal(
+      (
+        await query(`SELECT state FROM servers WHERE id=${sql(serverId)}`)
+      )[0][0],
+      "pending_validation",
+    );
+    assert.equal(
+      (await query("SELECT count(*) FROM server_assignments"))[0][0],
+      "0",
     );
     await due();
     await run();
     assert.equal(
+      sshChecks,
+      1,
+      "failed hosts require operator attention, not automatic recycling",
+    );
+    sshReady = true;
+    await query(
+      `UPDATE servers SET state='available',version=version+1,readiness_report='{"source":"ssh"}' WHERE id=${sql(serverId)}`,
+    );
+    await query("UPDATE control_plane_state SET mode='recovery'");
+    await due();
+    await run();
+    assert.equal(sshChecks, 1, "recovery mode must not probe hosts");
+    await query("UPDATE control_plane_state SET mode='normal'");
+    changeDuringProbe = true;
+    await due();
+    await run();
+    assert.equal(sshChecks, 2);
+    assert.equal(
+      (await query("SELECT count(*) FROM server_assignments"))[0][0],
+      "0",
+      "concurrent edits invalidate an in-flight readiness result",
+    );
+    await due();
+    await run();
+    assert.equal(sshChecks, 3);
+    assert.equal(
+      (
+        await query(`SELECT state FROM servers WHERE id=${sql(serverId)}`)
+      )[0][0],
+      "reserved",
+    );
+    assert.equal(
+      (
+        await query(
+          "SELECT count(*) FROM audit_events WHERE action='server.validate' AND redacted_diff->>'automatic'='true'",
+        )
+      )[0][0],
+      "2",
+    );
+    assert.equal(
       (await query("SELECT missing_resource FROM onboarding_requests"))[0][0],
       "relay",
     );
+    const onlyRelayMissing = await app.inject({
+      url: "/portal",
+      headers: { cookie },
+    });
+    assert.ok(onlyRelayMissing.body.includes("Your server is reserved."));
+
     const account = await form(
       "/operator/brevo-account",
       {
@@ -269,7 +403,40 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       false,
       "do not install before Brevo authentication succeeds",
     );
+    assert.equal(
+      (await query("SELECT attempts FROM onboarding_requests"))[0][0],
+      "0",
+      "DNS propagation does not exhaust the provider failure retry budget",
+    );
     verified = true;
+    failLocalStorageOnce = true;
+    await due();
+    await Promise.all([run(), run()]);
+    assert.equal(
+      (
+        await query("SELECT state,last_error_code FROM onboarding_requests")
+      )[0].join(","),
+      "queued,INSTALLER_STORAGE_UNAVAILABLE",
+    );
+    const deploymentId = (await query("SELECT id FROM deployments"))[0][0];
+    const revealUrl = `/v1/deployments/${deploymentId}/admin-credentials/reveal`;
+    const notInstalledReveal = await app.inject({
+      method: "POST",
+      url: revealUrl,
+      headers: { cookie, "x-bearportal-csrf": "1" },
+      payload: {},
+    });
+    assert.equal(notInstalledReveal.statusCode, 409);
+    const automaticRetryPage = await app.inject({
+      url: "/portal",
+      headers: { cookie },
+    });
+    assert.equal(
+      automaticRetryPage.body.includes('name="deployConsent"'),
+      false,
+    );
+    assert.equal(automaticRetryPage.body.includes('name="dnsToken"'), false);
+    assert.ok(automaticRetryPage.body.includes("retry automatically"));
     await due();
     await Promise.all([run(), run()]);
     assert.deepEqual(
@@ -298,9 +465,69 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     );
     await run();
     assert.equal(calls.filter((x) => x === "apply").length, 1);
+    await query(
+      "UPDATE deployments SET installer_status='tls_pending' WHERE lifecycle_state<>'deleted'",
+    );
+    await run();
+    assert.equal(
+      (await query("SELECT installer_status FROM deployments"))[0][0],
+      "tls_pending",
+    );
+    httpsReady = true;
+    await run();
+    assert.equal(
+      (await query("SELECT installer_status FROM deployments"))[0][0],
+      "succeeded",
+    );
+    assert.equal(
+      calls.filter((x) => x === "apply").length,
+      1,
+      "HTTPS completion must not reinstall or repeat consent",
+    );
+    assert.equal(
+      (await query("SELECT mail_verified FROM deployments"))[0][0],
+      "f",
+      "HTTPS readiness does not establish mail delivery",
+    );
     const portal = await app.inject({ url: "/portal", headers: { cookie } });
     assert.ok(portal.body.includes("Open Bearmail"));
     assert.ok(portal.body.includes("https://bearmail.company.site"));
+    assert.ok(portal.body.includes("https://mail.company.site/"));
+    assert.ok(portal.body.includes("Show administrator login"));
+    assert.ok(portal.body.includes("full mailbox address"));
+    assert.equal(portal.body.includes(installedAdminPassword), false);
+    const noCsrfReveal = await app.inject({
+      method: "POST",
+      url: revealUrl,
+      headers: { cookie },
+      payload: {},
+    });
+    assert.equal(noCsrfReveal.statusCode, 403);
+    const ownReveal = await app.inject({
+      method: "POST",
+      url: revealUrl,
+      headers: { cookie, "x-bearportal-csrf": "1" },
+      payload: {},
+    });
+    assert.equal(ownReveal.statusCode, 200, ownReveal.body);
+    assert.equal(ownReveal.json().username, "admin@company.site");
+    assert.equal(ownReveal.json().password, installedAdminPassword);
+    assert.equal(ownReveal.json().adminUrl, "https://mail.company.site/");
+    assert.match(String(ownReveal.headers["cache-control"]), /no-store/);
+    const plainOverview = await app.inject({
+      url: "/v1/portal/overview",
+      headers: { cookie },
+    });
+    assert.equal(plainOverview.body.includes(installedAdminPassword), false);
+    const revealAudit = await query(
+      "SELECT redacted_diff::text FROM audit_events WHERE action='deployment.admin_credentials_revealed'",
+    );
+    assert.equal(revealAudit.length, 1);
+    assert.equal(
+      JSON.stringify(revealAudit).includes(installedAdminPassword),
+      false,
+    );
+
     for (const secret of [
       credentials,
       "private-api-test-key",
@@ -311,6 +538,28 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       email: "other@recovery.example.org",
     });
     const otherCookie = String(second.headers["set-cookie"]).split(";")[0];
+    const otherReveal = await app.inject({
+      method: "POST",
+      url: revealUrl,
+      headers: { cookie: otherCookie, "x-bearportal-csrf": "1" },
+      payload: {},
+    });
+    assert.equal(otherReveal.statusCode, 404);
+    assert.equal(otherReveal.body.includes(installedAdminPassword), false);
+    const operatorReveal = await app.inject({
+      method: "POST",
+      url: revealUrl,
+      headers: { authorization: "Bearer " + token },
+      payload: {},
+    });
+    assert.equal(operatorReveal.statusCode, 404);
+    const forgedReveal = await app.inject({
+      method: "POST",
+      url: revealUrl,
+      headers: { cookie, "x-bearportal-csrf": "1" },
+      payload: { organizationId: "forged" },
+    });
+    assert.equal(forgedReveal.statusCode, 400);
     const other = await app.inject({
       url: "/v1/portal/overview",
       headers: { cookie: otherCookie },
@@ -334,6 +583,13 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       1,
       "an expired install lease must not replay unknown host changes",
     );
+    const interruptedPage = await app.inject({
+      url: "/portal",
+      headers: { cookie },
+    });
+    assert.equal(interruptedPage.body.includes('name="deployConsent"'), false);
+    assert.equal(interruptedPage.body.includes('name="dnsToken"'), false);
+    assert.ok(interruptedPage.body.includes("Our team"));
     const unsafeRetry = await form(
       "/portal/onboarding",
       { csrf: "1", deployConsent: "1" },

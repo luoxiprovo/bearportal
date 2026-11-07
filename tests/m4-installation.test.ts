@@ -542,6 +542,7 @@ describe("M4 installation", { concurrency: false }, () => {
     artifactDir = join(mkdtempSync(join(tmpdir(), "bearportal-m4-release-")), releaseId);
     writeRelease(artifactDir);
     const deps: ApiDeps = {
+      onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir,
       secretKeyHex,
@@ -775,6 +776,7 @@ describe("M4 installation", { concurrency: false }, () => {
     const localRuns: unknown[] = [];
     const localBrevo: string[] = [];
     const closed = await buildServer({
+      onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir: closedSecrets,
       secretKeyHex,

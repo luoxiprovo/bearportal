@@ -22,22 +22,34 @@ There is deliberately no reset in this startup sequence. `pnpm trial:reset` trun
 
 ## Pages and identity
 
-Open `/` to use development registration, `/portal` for the customer page, and `/operator` for the operator page. Development registration locally signs a verified identity without email confirmation. Production rejects test-issuer configuration and requires externally issued identity tokens.
+Open `/register` for customer registration, `/login` for returning users, `/portal` for the customer account and `/operator` for inventory and user allocations. With Identity Platform configured, customers can use Google or verified email/password accounts. Without it, the email-only form is a development preview that locally signs identities without email confirmation. Production rejects test identity signing.
 
-For operator access, `pnpm --silent trial:token admin` mints a development token for the bootstrap identity. `POST /v1/session` accepts `{ "idToken": "..." }` and sets `bp_session`. Cookie mutations require `x-bearportal-csrf: 1` or form `csrf=1`. Bearer requests are also supported. Keep generated tokens out of shared logs and files.
+The current deployment has Identity Platform configured and its email/password provider enabled. Use **http://localhost:8088** through the Mac tunnel for Google sign-in; its Google origin/button check passed. The 127.0.0.1 browser variant still reported an OAuth origin restriction. See [runbooks/identity-platform.md](runbooks/identity-platform.md) for new-project setup and `pnpm auth:configure`.
 
-A remote browser can reach the loopback service through an SSH port forward to the control-plane host. Portal sessions do not log a user into Bearmail.
+For simple development operator access, run `pnpm trial:login` on the server and open the printed `http://localhost:8088/operator/login#…` link on your Mac through the SSH tunnel. The link works once, expires after five minutes, and signs in the existing bootstrap administrator. Each new link replaces the previous one. This route is disabled without development identity signing. Keep the link private.
+
+For lower-level operator access, `pnpm --silent trial:token admin` mints a development token for the bootstrap identity. `POST /v1/session` accepts `{ "idToken": "..." }` and sets `bp_session`. Cookie mutations require `x-bearportal-csrf: 1` or form `csrf=1`. Bearer requests are also supported. Keep generated tokens out of shared logs and files.
+
+On your Mac, keep an SSH port forward open (replace the SSH destination with your control-plane host):
+
+```sh
+ssh -N -L 8088:127.0.0.1:8088 YOUR_SSH_USER@YOUR_BEARPORTAL_SERVER
+```
+
+Then open `http://localhost:8088/register`, `/login` or the generated operator link in the Mac browser. Run the tunnel command on the Mac; run `pnpm trial:login` on the server. Operator sessions last two hours, matching the inventory MFA window. The one-use link itself expires after five minutes.
+
+Portal sessions do not log a user into Bearmail. After installation, use **Show administrator login** in `/portal`, manage mailboxes at `mail.<domain>` and use mailbox addresses/passwords at `bearmail.<domain>`.
 
 ## Configure a real installation
 
 1. Prepare a separate mail server using [runbooks/preparation.md](runbooks/preparation.md). Put the control-plane public key in the remote SSH account and ensure the API process can read its private key and known-hosts file.
-2. Save the server through the admin inventory API. A normal startup probes it over SSH and can allocate it to an existing waiting organization.
+2. Save the server using **Add server** at `/operator` (or the admin inventory API). A normal startup probes it over SSH and can allocate it to an existing waiting organization.
 3. Store a Brevo account through the operator form, including separate API and SMTP credentials.
 4. Submit the customer domain. Follow the detected DNS provider's credential form; it can publish Brevo verification TXT/CNAME records.
-5. Confirm the mail-routing/setup-test consent and choose **Connect & set up Bearmail**. The guided flow saves a request, authenticates the mail service, and creates/provisions the deployment automatically. Missing capacity is shown as a wait and retried after resources arrive; the browser can be closed.
+5. Authorize domain verification, Brevo authentication, mail routing, installation and the setup test once when submitting the provider credential, then choose **Connect & set up Bearmail**. The guided flow encrypts and saves the credential and retains that authorization across retries. It saves a request, authenticates the mail service, and creates/provisions the deployment automatically. Missing capacity is shown as a wait and retried after resources arrive; the browser can be closed.
 6. Return to `/portal` for progress. Mailboxes and technical connection details are expandable. Installed/TLS-pending status still does not prove mail delivery.
 
-The lower-level `POST /v1/deployments` and `/:id/provision` APIs remain available to authenticated callers, but are no longer required for browser onboarding. Apply all migrations, including `006_onboarding.sql`, before starting the new UI. The queue is processed by the API itself; a separate worker service is not required.
+The lower-level `POST /v1/deployments` and `/:id/provision` APIs remain available to authenticated callers, but are no longer required for browser onboarding. Apply all migrations, including `006_onboarding.sql`, `007_inventory_management.sql` and `008_identity_accounts.sql`, before starting the new UI. The queue is processed by the API itself; a separate worker service is not required.
 
 New hostnames are `mail.<domain>` and `bearmail.<domain>`. Existing deployments keep their saved webmail hostname. Do not submit placeholder domains/credentials to a live flow expecting simulated success.
 
