@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mapBrevoPublishRecords } from "../packages/providers/brevo/src/index.ts";
+import { mapBrevoPublishRecords, authenticateBrevoDomain } from "../packages/providers/brevo/src/index.ts";
 import { detectDnsProvider } from "../packages/providers/dns/src/detect.ts";
 import { publishBrevoRecords, type DnsTransport } from "../packages/providers/dns/src/publish-brevo.ts";
 
@@ -30,6 +30,25 @@ describe("DNS provider detection and Brevo record publication", () => {
       "CNAME brevo1._domainkey",
       "CNAME brevo2._domainkey",
     ]);
+  });
+
+  it("normalizes Brevo's NA ownership-code placeholder to the apex in both mapping paths and Name.com writes", async () => {
+    const payload={authenticated:false,verified:false,dns_records:{
+      brevo_code:{type:'TXT',value:'brevo-code:root-check',host_name:' NA. '},
+      dmarc_record:{type:'TXT',value:'v=DMARC1; p=none',host_name:'_dmarc'},
+      dkim1Record:{type:'CNAME',value:'b1.example',host_name:'NA'},
+    }};
+    const result=await authenticateBrevoDomain('test-api-key','company.example',async()=>({status:200,body:JSON.stringify(payload)}));
+    assert.equal(result.records.find(record=>record.purpose==='brevo_code')?.host,'@');
+    assert.equal(result.publishRecords?.find(record=>record.value==='brevo-code:root-check')?.host,'@');
+    assert.equal(result.publishRecords?.find(record=>record.type==='CNAME')?.host,'NA','other DNS labels must not be rewritten');
+    const posts:Array<Record<string,unknown>>=[];
+    await publishBrevoRecords({provider:'namecom',zone:'company.example',credential:{provider:'namecom',username:'test-user',token:'test-token'},records:result.publishRecords!.filter(record=>record.value==='brevo-code:root-check'),transport:async input=>{
+      if(input.method==='GET')return {status:200,body:JSON.stringify({records:[{type:'TXT',host:'NA',answer:'brevo-code:root-check'},{type:'TXT',host:'',answer:'v=spf1 -all'}]})};
+      assert.equal(input.method,'POST');posts.push(JSON.parse(input.body!));return {status:200,body:'{}'};
+    }});
+    assert.equal(posts.length,1);
+    assert.equal(posts[0].host,'');assert.equal(posts[0].answer,'brevo-code:root-check');
   });
 
   it("adds a Brevo TXT without removing the existing TXT values at the same name", async () => {

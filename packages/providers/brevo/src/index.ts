@@ -220,14 +220,19 @@ export function mapBrevoPublishRecords(payload: unknown, apiKey: string): BrevoP
       : typeof record.host === "string"
         ? record.host
         : "";
-    let host = hostName.trim();
-    if (host.endsWith(".")) host = host.slice(0, -1);
-    if (host.length === 0) host = "@";
+    const host = normalizedBrevoHost(hostName, key === "brevo_code" && type === "TXT");
     if (host.length > 253 || /\s/.test(host)) continue;
     if (mapped.some((item) => item.type === type && item.host === host && item.value === value)) continue;
     mapped.push({ type, host, value });
   }
   return mapped;
+}
+
+/** Brevo can return NA as the apex placeholder for its ownership-code TXT. */
+function normalizedBrevoHost(hostName: string, ownershipCode: boolean): string {
+  const host=hostName.trim().replace(/\.$/, "");
+  if(!host || (ownershipCode && host.toUpperCase()==="NA")) return "@";
+  return host;
 }
 
 function readJson(body: string): unknown {
@@ -264,9 +269,7 @@ function mapBrevoRecords(payload: unknown, apiKey: string): BrevoDnsRecord[] {
       : typeof record.host === "string"
         ? record.host
         : "";
-    let host = hostName.trim();
-    if (host.endsWith(".")) host = host.slice(0, -1);
-    if (host.length === 0) host = "@";
+    const host = normalizedBrevoHost(hostName, purpose === "brevo_code");
     if (host.length > 253 || /\s/.test(host)) continue;
     mapped.push({ purpose, type: "TXT", host, value });
   }
