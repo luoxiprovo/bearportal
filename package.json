@@ -17,7 +17,8 @@
     "trial:walk": "tsx scripts/local-trial.ts walk",
     "trial:login": "tsx scripts/local-trial.ts login",
     "inventory": "tsx scripts/local-trial.ts inventory",
-    "auth:configure": "tsx scripts/local-trial.ts auth-configure"
+    "auth:configure": "tsx scripts/local-trial.ts auth-configure",
+    "reset:test-data": "tsx scripts/local-trial.ts reset"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

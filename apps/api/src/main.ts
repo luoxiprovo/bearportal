@@ -22,8 +22,8 @@ const app = await buildServer({
   audience: config.audience,
   schedulerToken: config.schedulerToken,
   devJwtPrivateKeyPem,
-  sshProbe: liveSshProbe,
-  mailInstall: liveMailInstall,
+  sshProbe: (host) => liveSshProbe(host, config.skipSshHostKeyVerification),
+  mailInstall: (hooks) => liveMailInstall({...hooks, skipHostKeyVerification:config.skipSshHostKeyVerification}),
 });
 
 await app.listen({ host: config.bindHost, port: config.port });

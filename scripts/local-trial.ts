@@ -1,3 +1,4 @@
+import { resetTestData } from "./reset-test-data.ts";
 import { configureIdentity } from "./configure-identity.ts";
 import { runInventory, inventoryHelp } from "./inventory-cli.ts";
 import { createDevelopmentLogin } from "../apps/api/src/development-login.ts";
@@ -133,30 +134,7 @@ async function migrateCommand(): Promise<void> {
 async function resetCommand(): Promise<void> {
   const env = loadTrialEnv();
   assertDevelopment(env);
-  console.log("Deleting rows in the local bearportal database. Plans and schema_migrations stay.");
-  const client = new pg.Client({ connectionString: env.MIGRATION_DATABASE_URL });
-  await client.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("SELECT set_config('bearportal.actor', 'platform_administrator', true)");
-    await client.query(`TRUNCATE TABLE
-      cancellation_schedules, restore_requests, upgrade_plans, cleanup_reports,
-      audit_events, idempotency_keys, outbox_events, backups, jobs, dns_connections,
-      deployments, secret_refs, domains, server_assignments, allocation_requests,
-      invitations, operator_roles, organizations, relay_connections, servers, users,
-      diagnoses, provider_attempts
-      RESTART IDENTITY CASCADE`);
-    const updated = await client.query("UPDATE control_plane_state SET mode = 'normal' WHERE id = 1");
-    if (updated.rowCount !== 1) throw new Error("control_plane_state was not reset.");
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    await client.end();
-  }
-  if (existsSync(stateFile)) unlinkSync(stateFile);
-  console.log("Local rows deleted. Run pnpm trial:bootstrap before the next walk.");
+  await resetTestData(env as unknown as Record<string,string>, root, process.argv.slice(3));
 }
 
 async function bootstrapCommand(): Promise<void> {

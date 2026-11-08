@@ -12,6 +12,7 @@ export type SshEndpoint = {
   privateKeyFile: string;
   knownHostsFile: string;
   acceptNewHostKey: boolean;
+  skipHostKeyVerification?: boolean;
 };
 
 export type SshInstallPlan = {
@@ -140,8 +141,7 @@ function sshArgs(endpoint: SshEndpoint): string[] {
     "ssh",
     "-o", "BatchMode=yes",
     "-o", "IdentitiesOnly=yes",
-    "-o", endpoint.acceptNewHostKey ? "StrictHostKeyChecking=accept-new" : "StrictHostKeyChecking=yes",
-    "-o", `UserKnownHostsFile=${endpoint.knownHostsFile}`,
+    ...hostKeyOptions(endpoint),
     "-i", endpoint.privateKeyFile,
     "-p", "22",
     "-l", SSH_LOGIN_USER,
@@ -154,8 +154,7 @@ function scpOptions(endpoint: SshEndpoint): string[] {
     "scp",
     "-o", "BatchMode=yes",
     "-o", "IdentitiesOnly=yes",
-    "-o", endpoint.acceptNewHostKey ? "StrictHostKeyChecking=accept-new" : "StrictHostKeyChecking=yes",
-    "-o", `UserKnownHostsFile=${endpoint.knownHostsFile}`,
+    ...hostKeyOptions(endpoint),
     "-o", `User=${SSH_LOGIN_USER}`,
     "-i", endpoint.privateKeyFile,
     "-P", "22",
@@ -217,4 +216,11 @@ function assertSafeArg(value: string): void {
   if (value.length === 0 || /[\s;|&$`<>\\"'()*?[\]]/.test(value)) {
     throw new Error("An SSH argument contains a shell character.");
   }
+}
+
+/** An explicit development override; callers must enforce environment restrictions. */
+function hostKeyOptions(endpoint:SshEndpoint):string[] {
+  return endpoint.skipHostKeyVerification
+    ? ["-o","StrictHostKeyChecking=no","-o","UserKnownHostsFile=/dev/null","-o","GlobalKnownHostsFile=/dev/null","-o","UpdateHostKeys=no"]
+    : ["-o",endpoint.acceptNewHostKey?"StrictHostKeyChecking=accept-new":"StrictHostKeyChecking=yes","-o",`UserKnownHostsFile=${endpoint.knownHostsFile}`];
 }

@@ -26,7 +26,9 @@ After installation, the owner can reveal the generated administrator username/pa
 6. BearPortal downloads a resolved Bearmail `main` commit and runs the noninteractive Python program `bearmail-install` for dry-run and apply over SSH as `bearadmin`.
 7. The installer configures services and mail DNS. BearPortal records results, checks both HTTPS hostnames and clears TLS-pending status when they are ready. Installation and HTTPS success do not establish mail delivery.
 
-The customer portal shows seven setup milestones: account, domain, provider connection, resource allocation, domain authentication, Bearmail installation and secure connections. It highlights the current step, explains waits or review needs, and gives timing guidance without promising a completion deadline. Installation is shown as complete after HTTPS checks succeed; mailbox access and mail delivery still require testing.
+The customer portal shows two backend stages after setup is submitted: verifying the Brevo domain and installing Bearmail (including HTTPS checks). A progress bar, current-stage indicator and animated working icon distinguish active work from waits and paused failures. Specific, credential-free error descriptions and codes explain DNS, provider and database failures. Setup is complete after HTTPS checks succeed; mailbox access and mail delivery still require testing.
+
+Customer setup forms renew managed sign-in before submission. If renewal fails, the form stays on the page with a sign-in link; provider credentials are not sent to authentication endpoints.
 
 The customer can close the browser during setup. Known retryable failures continue automatically; interrupted host operations with unknown outcomes require operator review. Backend installation issues do not ask the customer to authorize each step again or resubmit a working credential.
 
@@ -57,7 +59,7 @@ pnpm trial:bootstrap
 pnpm trial:start
 ```
 
-Apply all migrations, including `007_inventory_management.sql` and `008_identity_accounts.sql`. Normal startup uses live SSH, Brevo and installer integrations. Development mode does not simulate those operations. Do not run `trial:reset` on retained data.
+Apply all migrations, including `007_inventory_management.sql` and `008_identity_accounts.sql`. Normal startup uses live SSH, Brevo and installer integrations. Development mode does not simulate those operations. Do not run `trial:reset` on retained data. For a deliberate fresh test with new inventory, see [Reset local test data](docs/runbooks/test-reset.md). The reset preserves operator access and backs up the database and encrypted credentials.
 
 Configure Identity Platform after enabling its Google and Email/Password providers:
 

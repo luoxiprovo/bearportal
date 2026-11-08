@@ -221,6 +221,7 @@ export function openApiDocument(): Record<string, unknown> {
       "/operator": { get: { operationId: "operatorPortal" } },
       "/login": {"get": {"operationId": "browserSignInPage", "responses": {"200": {"description": "Browser authentication result"}}}},
     "/auth/options": {"get": {"operationId": "browserAuthOptions", "responses": {"200": {"description": "Browser authentication result"}}}},
+    "/assets/customer-session.js": {"get": {"operationId": "customerSessionScript", "responses": {"200": {"description": "Customer form session renewal script"}}}},
     "/assets/auth.js": {"get": {"operationId": "browserAuthScript", "responses": {"200": {"description": "Browser authentication result"}}}},
     "/auth/signup": {"post": {"operationId": "emailPasswordSignup", "responses": {"200": {"description": "Browser authentication result"}}}},
     "/auth/signin": {"post": {"operationId": "emailPasswordSignin", "responses": {"200": {"description": "Browser authentication result"}}}},

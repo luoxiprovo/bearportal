@@ -102,20 +102,21 @@ export function hostKeyFingerprint(knownHosts: string, host: string): string | n
 }
 
 /** Probe one inventory address. The host must already be a public unicast IPv4 address. */
-export async function liveSshProbe(host: string): Promise<SshProbeOutcome> {
+export async function liveSshProbe(host: string, skipHostKeyVerification = false): Promise<SshProbeOutcome> {
   if (!existsSync(SSH_PRIVATE_KEY)) {
     return { ok: false, failures: ["server.ssh_unavailable"], report: null };
   }
-  if (!existsSync(SSH_KNOWN_HOSTS)) {
+  if (!skipHostKeyVerification && !existsSync(SSH_KNOWN_HOSTS)) {
     writeFileSync(SSH_KNOWN_HOSTS, "", { mode: 0o600 });
     chmodSync(SSH_KNOWN_HOSTS, 0o600);
   }
-  const known = readFileSync(SSH_KNOWN_HOSTS, "utf8");
+  const known = skipHostKeyVerification ? "" : readFileSync(SSH_KNOWN_HOSTS, "utf8");
   const endpoint: SshEndpoint = {
     host,
     privateKeyFile: SSH_PRIVATE_KEY,
     knownHostsFile: SSH_KNOWN_HOSTS,
-    acceptNewHostKey: hostKeyFingerprint(known, host) == null,
+    acceptNewHostKey: !skipHostKeyVerification && hostKeyFingerprint(known, host) == null,
+    skipHostKeyVerification,
   };
   let commands: string[][];
   try {
@@ -130,7 +131,7 @@ export async function liveSshProbe(host: string): Promise<SshProbeOutcome> {
     if (captures.length === 1 && result.code !== 0) break;
   }
   while (captures.length < 6) captures.push({ code: 255, stdout: "", stderr: "" });
-  const fingerprint = hostKeyFingerprint(readFileSync(SSH_KNOWN_HOSTS, "utf8"), host);
+  const fingerprint = skipHostKeyVerification ? null : hostKeyFingerprint(readFileSync(SSH_KNOWN_HOSTS, "utf8"), host);
   return interpretSshProbe({
     unameS: captures[0]!,
     unameM: captures[1]!,

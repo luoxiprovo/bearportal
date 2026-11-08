@@ -8,7 +8,11 @@ Open `/operator` with an authenticated operator session. The **Servers** and **B
 
 Infrastructure operators and platform administrators can add, review and edit servers. Only platform administrators can manage Brevo credentials. Support access is read-only and excludes Brevo inventory. Inventory mutations require a verified identity and TOTP authentication within the preceding two hours. Other protected operations retain their own MFA windows. A login link still expires after five minutes and works once; its session token expires after two hours.
 
+New servers are checked over SSH automatically before the add request finishes, in both the portal and CLI. The portal shows **Checking SSH access…** while saving. A failed check leaves the server unavailable and shows **SSH check failed** with the cause. For a host-key mismatch, verify the machine’s fingerprint through a trusted channel before updating the control plane’s known_hosts; do not automatically accept a changed key.
+
 1. Choose **Add server**, enter its public IPv4 address, contact and provider reference, and confirm the preparation checklist. BearPortal checks SSH immediately. A passing check can assign the server to a waiting customer.
+
+
 2. Choose **Review / edit** to change metadata. Changing an unused server's address resets readiness; choose **Check SSH access** afterward. Assigned, recovery-reserved or tainted servers retain their address and cannot be removed here.
 3. Choose **Add Brevo account** and enter its account email, SMTP login, separate API and SMTP keys, and recorded daily allowance. Keys are encrypted and never displayed again. Blank replacement fields preserve existing keys. This allowance is operator-entered, not live remaining quota.
 4. Review a free Brevo account to pause it, replace credentials or remove it. Assigned accounts permit label and allowance edits only. Credential edits do not update an installed mail server automatically.
@@ -57,3 +61,7 @@ Quarantine retains ownership and taint. Cleanup outcome `deleted` retires the se
 Source: [../../packages/servers/src/allocate.ts](../../packages/servers/src/allocate.ts), [../../apps/api/src/inventory.ts](../../apps/api/src/inventory.ts), [lifecycle.md](lifecycle.md).
 
 The portal reads the configured application database only. Records held in a separate recovery database do not appear automatically. Reconstructed records require review and an explicit import; a recovery review database is not a complete backup.
+
+## Replacing test servers at the same IP
+
+For disposable development servers, set `BEARPORTAL_TEST_SKIP_SSH_HOST_KEY_CHECK=1` in `.data/trial/env` and restart the API. This mode neither remembers nor verifies server host keys: readiness probes, SSH installer commands and SCP transfers use `/dev/null` for both host-key lists. Existing `known_hosts` entries remain intact but are ignored. The control-plane private key, `bearadmin` login and sudo requirements still apply. This disables protection against server impersonation; use it only for disposable tests. Startup rejects this setting unless `BEARPORTAL_ENV=development`. Omit it or set it to `0` to restore normal host-key checking.

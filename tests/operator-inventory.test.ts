@@ -68,6 +68,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
   }
   const logs: Buffer[] = [];
   let probes = 0;
+  let failSsh = false;
   const app = await buildServer(
     {
       databaseUrl,
@@ -79,6 +80,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
       onboardingIntervalMs: 0,
       sshProbe: async () => {
         probes++;
+        if(failSsh)return {ok:false,failures:["server.host_key_mismatch"],report:null};
         return {
           ok: true,
           failures: [],
@@ -804,6 +806,17 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
       false,
     );
     assert.ok(infraPage.body.includes("Read-only access"));
+    failSsh=true;
+    const beforeFailure=probes;
+    const failedAdd=await form("/operator/inventory/servers",{...serverFields,label:"Failed SSH server",publicIpv4:"203.0.113.199",providerReference:"failed-ssh-test"});
+    assert.equal(failedAdd.statusCode,200,failedAdd.body);
+    assert.equal(probes,beforeFailure+1,"server addition runs the SSH probe without a separate validate request");
+    const failedPage=await app.inject({url:"/operator",headers:{authorization:"Bearer "+tokens.admin}});
+    assert.match(failedPage.body,/SSH check failed/);
+    assert.match(failedPage.body,/host key differs from the saved key/);
+    assert.match(failedPage.body,/server.host_key_mismatch/);
+    assert.deepEqual(await query("SELECT state FROM servers WHERE label='Failed SSH server'"),[["pending_validation"]]);
+
   } finally {
     await app.close();
   }

@@ -926,7 +926,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     assert.ok(operatorPage.text.includes(owner.organizationId));
     assert.ok(operatorPage.text.includes(other.organizationId));
     assert.ok(operatorPage.text.includes("ops@recovery-bearportal.com"));
-    assert.ok(operatorPage.text.includes("Last SSH check"));
+    assert.ok(operatorPage.text.includes("Last successful SSH check"));
     assert.ok(operatorPage.text.includes("Brevo accounts"));
     assert.ok(operatorPage.text.includes('action="/operator/inventory/brevo"'));
     assert.equal(operatorPage.text.includes('name="domain"'), false);
@@ -996,7 +996,8 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
       assert.ok(portalText.includes("Let’s make it yours."));
       assert.ok(portalText.includes("Waiting for capacity"));
       assert.ok(portalText.includes("operator-reported"));
-      assert.equal(portalText.includes("<script"), false);
+      assert.ok(portalText.includes('<script src="/assets/customer-session.js" defer></script>'));
+      assert.equal(portalText.includes("<script>"), false);
       const again = await fetch(`${origin}/register`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },

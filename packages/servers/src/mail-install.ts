@@ -31,6 +31,7 @@ export type MailInstallHooks = {
   readSecret: (secretId: string) => Promise<string>;
   privateKeyFile?: string;
   knownHostsFile?: string;
+  skipHostKeyVerification?: boolean;
   transport?: MailTransport;
   spawn?: (args: string[], timeoutMs: number) => Promise<SshCommandResult>;
   workRoot?: string;
@@ -210,6 +211,7 @@ async function runMailInstall(hooks: MailInstallHooks, mode: "dry_run" | "apply"
         privateKeyFile,
         knownHostsFile: hooks.knownHostsFile ?? SSH_KNOWN_HOSTS,
         acceptNewHostKey: false,
+        skipHostKeyVerification: hooks.skipHostKeyVerification,
       },
       operationId,
       localInput,

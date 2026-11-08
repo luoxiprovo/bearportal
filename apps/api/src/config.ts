@@ -10,6 +10,7 @@ const REQUIRED = [
 
 export type ApiConfig = {
   identityPlatform?: IdentityPlatformConfig;
+  skipSshHostKeyVerification: boolean;
   databaseUrl: string;
   secretKeyHex: string;
   jwtPublicKeyFile: string;
@@ -37,6 +38,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
   if (env.BEARPORTAL_ENV === "production" && env.BEARPORTAL_ALLOW_TEST_ISSUER === "1") {
     throw new Error("Test identity issuer cannot be enabled in production.");
   }
+  if (env.BEARPORTAL_TEST_SKIP_SSH_HOST_KEY_CHECK === "1" && env.BEARPORTAL_ENV !== "development") {
+    throw new Error("BEARPORTAL_TEST_SKIP_SSH_HOST_KEY_CHECK is allowed only in development.");
+  }
   const allowTest = env.BEARPORTAL_ALLOW_TEST_ISSUER === "1";
   const issuer = env.BEARPORTAL_JWT_ISSUER ?? "";
   if (!allowTest && !issuer.startsWith("https://securetoken.google.com/")) {
@@ -48,6 +52,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
   }
   return {
     identityPlatform:readIdentityPlatformConfig(env),
+    skipSshHostKeyVerification: env.BEARPORTAL_TEST_SKIP_SSH_HOST_KEY_CHECK === "1",
     databaseUrl: env.DATABASE_URL ?? "",
     secretKeyHex: env.BEARPORTAL_SECRET_KEY ?? "",
     jwtPublicKeyFile: env.BEARPORTAL_JWT_PUBLIC_KEY_FILE ?? "",

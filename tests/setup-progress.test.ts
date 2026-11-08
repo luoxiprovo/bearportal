@@ -12,16 +12,13 @@ const base: CustomerPortalView = {
 test("setup milestones reflect the saved stage and do not promise readiness before HTTPS", () => {
   const connected = { ...base, domainName: "example.com", dnsState: "stored" };
   const cases: [Partial<CustomerPortalView>, number, boolean][] = [
-    [{}, 1, false],
-    [{ domainName: "example.com" }, 2, false],
-    [connected, 3, false],
-    [{ ...connected, onboardingState: "waiting_resources" }, 3, false],
-    [{ ...connected, onboardingState: "queued", onboardingError: "DNS_PROPAGATION" }, 4, false],
-    [{ ...connected, onboardingState: "installing" }, 5, false],
-    [{ ...connected, onboardingState: "attention", onboardingError: "INSTALLER_FAILED", brevoAuthenticated: true, brevoVerified: true }, 5, false],
-    [{ ...connected, onboardingState: "attention", onboardingError: "DNS_PROVIDER_CHANGED" }, 2, false],
-    [{ ...connected, onboardingState: "installed", installerStatus: "tls_pending" }, 6, false],
-    [{ ...connected, onboardingState: "installed", installerStatus: "succeeded" }, 6, true],
+    [{ ...connected, onboardingState: "waiting_resources" }, 0, false],
+    [{ ...connected, onboardingState: "queued", onboardingError: "DNS_PROPAGATION" }, 0, false],
+    [{ ...connected, onboardingState: "installing" }, 1, false],
+    [{ ...connected, onboardingState: "attention", onboardingError: "INSTALLER_FAILED", brevoAuthenticated: true, brevoVerified: true }, 1, false],
+    [{ ...connected, onboardingState: "attention", onboardingError: "DNS_PROVIDER_CHANGED" }, 0, false],
+    [{ ...connected, onboardingState: "installed", installerStatus: "tls_pending" }, 1, false],
+    [{ ...connected, onboardingState: "installed", installerStatus: "succeeded" }, 1, true],
   ];
   for (const [state, current, complete] of cases) {
     const view = { ...base, ...state };
@@ -31,8 +28,18 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
     assert.equal((html.match(/aria-current="step"/g) ?? []).length, complete ? 0 : 1);
     assert.ok(html.includes('aria-label="Setup progress"'));
   }
-  assert.match(setupProgress({ ...connected, onboardingState: "waiting_resources" }).note, /can’t give a completion time/);
-  assert.match(setupProgress({ ...connected, onboardingState: "attention" }).note, /paused for our team/);
+  assert.match(setupProgress({ ...connected, onboardingState: "waiting_resources" }).note, /No completion estimate/);
+  assert.match(setupProgress({ ...connected, onboardingState: "attention" }).note, /paused for operator review/);
+  const before = renderCustomerPortal(connected);
+  assert.doesNotMatch(before, /role="progressbar"/);
+  const executing = renderCustomerPortal({ ...connected, onboardingState: "installing" });
+  assert.match(executing, /class="milestone-number working-spinner"/);
+  assert.match(executing, /Step 2 of 2/);
+  const failed = renderCustomerPortal({ ...connected, onboardingState: "attention", onboardingError: "DNS_ZONE_NOT_FOUND" });
+  assert.match(failed, /could not find this domain/);
+  assert.match(failed, /Error code: <code>DNS_ZONE_NOT_FOUND/);
+  assert.doesNotMatch(failed, /class="milestone-number working-spinner"/);
+  assert.doesNotMatch(failed, /Your account<\/strong>|Provider connection<\/strong>/);
   const pending = renderCustomerPortal({ ...connected, onboardingState: "installed", installerStatus: "tls_pending" });
   assert.match(pending, /location.reload/);
   assert.doesNotMatch(pending, /Your setup is complete/);

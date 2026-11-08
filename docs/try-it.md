@@ -18,7 +18,7 @@ pnpm trial:start
 
 `trial:prepare` creates the local environment and signing keys without overwriting an existing environment. Inspect the generated connection settings privately before migration. `trial:migrate` applies schema changes; bootstrap creates the privileged administrator or accepts the same existing bootstrap identity. The API normally listens on `http://127.0.0.1:8088`.
 
-There is deliberately no reset in this startup sequence. `pnpm trial:reset` truncates operational tables, including users, saved servers, credential references, deployments and audit history, in the configured trial database. It is not a prerequisite for tests or ordinary startup. It does not restore those records from surviving encrypted files.
+There is deliberately no reset in this startup sequence. For an intentional fresh test, stop the API and run `pnpm reset:test-data --confirm-clear-test-data`. This backs up the database and encrypted credential files, clears customer and inventory records, and preserves operator access, plans, app configuration and SSH keys. See [the test reset runbook](runbooks/test-reset.md). It does not clean remote servers or provider accounts.
 
 ## Pages and identity
 

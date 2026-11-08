@@ -363,6 +363,9 @@ describe("M1 contracts", () => {
       BEARPORTAL_JWT_AUDIENCE: "example",
       BEARPORTAL_SECRETS_DIR: "/tmp/secrets",
     };
+    assert.equal(loadConfig(base).skipSshHostKeyVerification, false);
+    assert.equal(loadConfig({...base,BEARPORTAL_ENV:"development",BEARPORTAL_TEST_SKIP_SSH_HOST_KEY_CHECK:"1"}).skipSshHostKeyVerification,true);
+    assert.throws(()=>loadConfig({...base,BEARPORTAL_ENV:"production",BEARPORTAL_TEST_SKIP_SSH_HOST_KEY_CHECK:"1"}),/allowed only in development/);
     assert.equal(loadConfig(base).schedulerToken, undefined);
     assert.equal(loadConfig({ ...base, BEARPORTAL_SCHEDULER_TOKEN: "" }).schedulerToken, undefined);
     assert.equal(loadConfig({ ...base, BEARPORTAL_SCHEDULER_TOKEN: "0123456789abcdef" }).schedulerToken, "0123456789abcdef");

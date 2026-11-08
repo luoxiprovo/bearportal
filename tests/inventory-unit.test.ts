@@ -101,6 +101,19 @@ describe("inventory units", () => {
     assert.equal(parseCommand("probe_readiness", []), null);
   });
 
+  it("can explicitly bypass host identity for test probes, commands and file transfers", () => {
+    const endpoint={host:"203.0.113.10",privateKeyFile:"/var/lib/bearportal/ssh/id_ed25519",knownHostsFile:"/var/lib/bearportal/ssh/known_hosts",acceptNewHostKey:false,skipHostKeyVerification:true};
+    const plan=sshInstallPlan({endpoint,operationId:"8d0b6b6e-1c0a-4e0a-9c1a-6c0e5b7a1111",localInput:"/tmp/input.json",localDns:"/tmp/dns.json",localRelay:"/tmp/relay.json",localAdmin:"/tmp/admin.json",localInstaller:"/tmp/bearmail-install",localResult:"/tmp/result.json"});
+    for(const args of [...sshReadinessCommands(endpoint),plan.dryRun,plan.apply,plan.copyInput,plan.fetchResult]){
+      assert.ok(args.includes("StrictHostKeyChecking=no"));
+      assert.ok(args.includes("UserKnownHostsFile=/dev/null"));
+      assert.ok(args.includes("GlobalKnownHostsFile=/dev/null"));
+      assert.ok(args.includes(endpoint.privateKeyFile));
+      assert.equal(args.includes("StrictHostKeyChecking=accept-new"),false);
+    }
+    assert.ok(sshReadinessCommands({...endpoint,skipHostKeyVerification:false})[0].includes("StrictHostKeyChecking=yes"));
+  });
+
   it("plans an SSH install as fixed arguments", () => {
     const plan = sshInstallPlan({
       endpoint: {

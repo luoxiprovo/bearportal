@@ -1474,6 +1474,7 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
       identityState: server.identity_state,
       fingerprint: server.fingerprint,
       readiness: readinessLabel(server),
+      readinessFailures: server.failures ? JSON.parse(server.failures) as string[] : [],
       tainted: server.tainted,
       hostingEstimate: estimateByServer.get(server.id) ?? null,
     })),

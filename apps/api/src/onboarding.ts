@@ -1,3 +1,4 @@
+import { setupFailureCode } from "./setup-errors.ts";
 import { refreshInstalledTls, type InstalledTlsProbe } from "./installed-tls.ts";
 import { refreshWaitingInventory } from "./refresh-inventory.ts";
 import { randomUUID, timingSafeEqual } from "node:crypto";
@@ -32,18 +33,20 @@ export function registerOnboarding(
     if (active) return active;
     active = processOne()
       .catch(async (error) => {
+        const failure = setupFailureCode(error);
+        const persistedCode = failure === "PROVIDER_RETRY" ? "SETUP_REVIEW_REQUIRED" : failure;
         if (currentOrganization) {
           await inventory
             .withSystem("inventory_worker", async (db) => {
               await inventory.setActor(db, "platform_administrator");
               await db.query(
-                "UPDATE onboarding_requests SET state='attention',last_error_code='SETUP_REVIEW_REQUIRED',updated_at=now() WHERE organization_id=$1",
-                [currentOrganization],
+                "UPDATE onboarding_requests SET state='attention',last_error_code=$2,updated_at=now() WHERE organization_id=$1",
+                [currentOrganization, persistedCode],
               );
               await recordReview(
                 db,
                 currentOrganization!,
-                "SETUP_REVIEW_REQUIRED",
+                persistedCode,
               );
             })
             .catch(() => undefined);
@@ -375,9 +378,11 @@ export function registerOnboarding(
             [item.organization_id],
           );
           return { item, deployment, auth };
-        } catch {
+        } catch (error) {
+          const failure = setupFailureCode(error);
+          if (failure.startsWith("DATABASE_") || failure === "MAILBOX_ADDRESS_CONFLICT") throw error;
           await inventory.setActor(db, "platform_administrator");
-          await defer("queued", "PROVIDER_RETRY");
+          await defer("queued", failure);
           return null;
         }
       },

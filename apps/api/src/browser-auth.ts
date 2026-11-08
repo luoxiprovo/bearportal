@@ -1,3 +1,4 @@
+import { CUSTOMER_SESSION_SCRIPT } from "./customer-session-script.ts";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -44,6 +45,7 @@ export function registerBrowserAuth(
   client: IdentityPlatformClient | undefined,
   keyHex: string,
 ) {
+  app.get("/assets/customer-session.js", async (_request, reply) => reply.type("application/javascript; charset=utf-8").header("cache-control", "no-store").send(CUSTOMER_SESSION_SCRIPT));
   const requireConfig = () => {
     if (!config || !client)
       throw new HttpError(
