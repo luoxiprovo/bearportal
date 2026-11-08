@@ -28,7 +28,7 @@ test('explicit test reset clears inventory and customers while preserving operat
  const root=mkdtempSync(join(tmpdir(),'bearportal-reset-test-'));
  const secrets=join(root,'secrets');mkdirSync(secrets);
  const name=randomUUID()+'.bin';writeFileSync(join(secrets,name),'encrypted-test-canary');
- await resetTestData({BEARPORTAL_ENV:'development',MIGRATION_DATABASE_URL:migrationUrl,BEARPORTAL_API_ORIGIN:'http://127.0.0.1:1',BEARPORTAL_SECRETS_DIR:secrets},root,['--confirm-clear-test-data']);
+ await resetTestData({BEARPORTAL_ENV:'development',MIGRATION_DATABASE_URL:migrationUrl,BEARPORTAL_BACKUP_DATABASE_URL:superDatabaseUrl,BEARPORTAL_API_ORIGIN:'http://127.0.0.1:1',BEARPORTAL_SECRETS_DIR:secrets},root,['--confirm-clear-test-data']);
  assert.equal(existsSync(join(secrets,name)),false);
  const backups=join(root,'.data','backups');const backup=join(backups,readdirSync(backups)[0]);
  assert.ok(existsSync(join(backup,'database.dump')));

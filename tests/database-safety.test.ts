@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { integrationDatabases } from "./helpers/database.ts";
+import { integrationDatabases, queryTestDatabase } from "./helpers/database.ts";
 
 function urls(database = "bearportal_test_safety"): NodeJS.ProcessEnv {
   return {
@@ -20,4 +20,11 @@ test("destructive integration tests reject missing, working, and mismatched data
   }
   assert.throws(() => integrationDatabases({ ...urls(), BEARPORTAL_SUPER_DATABASE_URL: urls().BEARPORTAL_SUPER_DATABASE_URL + "?host=another-host" }), /unsupported connection parameter/);
   assert.doesNotThrow(() => integrationDatabases(urls()));
+});
+
+test("database query helpers preserve duplicate column names in the CI driver path", async () => {
+  const {superDatabaseUrl}=integrationDatabases();
+  const sql="SELECT 'user-id'::text AS id, 'organization-id'::text AS id";
+  assert.deepEqual(await queryTestDatabase(sql,superDatabaseUrl,false),[["user-id","organization-id"]]);
+  if(process.env.BEARPORTAL_TEST_USE_LOCAL_PSQL === "1") assert.deepEqual(await queryTestDatabase(sql,superDatabaseUrl,true),[["user-id","organization-id"]]);
 });

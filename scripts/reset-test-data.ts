@@ -45,7 +45,9 @@ export async function resetTestData(env: Record<string, string>, root: string, a
   const files = existsSync(secretsDir) ? readdirSync(secretsDir).filter(name => /^[0-9a-f-]{36}\.bin$/i.test(name)) : [];
   const backup = join(root,'.data','backups',`test-reset-${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID().slice(0,8)}`);
   mkdirSync(backup,{recursive:true,mode:0o700});chmodSync(backup,0o700);
-  const pgEnv = {...process.env,PGHOST:database.hostname,PGPORT:database.port||'5432',PGDATABASE:decodeURIComponent(database.pathname.slice(1)),PGUSER:decodeURIComponent(database.username),PGPASSWORD:decodeURIComponent(database.password)};
+  const backupDatabase = new URL(env.BEARPORTAL_BACKUP_DATABASE_URL || env.MIGRATION_DATABASE_URL);
+  if (backupDatabase.hostname !== database.hostname || (backupDatabase.port||'5432') !== (database.port||'5432') || backupDatabase.pathname !== database.pathname) throw new Error('Backup connection must target the same database as the reset. No data was cleared.');
+  const pgEnv = {...process.env,PGHOST:backupDatabase.hostname,PGPORT:backupDatabase.port||'5432',PGDATABASE:decodeURIComponent(backupDatabase.pathname.slice(1)),PGUSER:decodeURIComponent(backupDatabase.username),PGPASSWORD:decodeURIComponent(backupDatabase.password)};
   // Password stays in the child environment; never put a credential-bearing URL in arguments or errors.
   const dump = join(backup,'database.dump');
   const saved = spawnSync('pg_dump',['--format=custom','--file',dump],{env:pgEnv,stdio:'pipe'});

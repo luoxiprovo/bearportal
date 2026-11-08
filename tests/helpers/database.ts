@@ -36,10 +36,10 @@ export function integrationDatabases(env: NodeJS.ProcessEnv = process.env) {
   };
 }
 
-export async function queryTestDatabase(sql: string, connectionString: string): Promise<string[][]> {
+export async function queryTestDatabase(sql: string, connectionString: string, useLocalPsql = process.env.BEARPORTAL_TEST_USE_LOCAL_PSQL === "1"): Promise<string[][]> {
   // Validate even when this helper is called independently of a suite's startup.
   integrationDatabases({ DATABASE_URL: connectionString, MIGRATION_DATABASE_URL: connectionString, BEARPORTAL_SUPER_DATABASE_URL: connectionString });
-  if (process.env.BEARPORTAL_TEST_USE_LOCAL_PSQL === "1") {
+  if (useLocalPsql) {
     const url = new URL(connectionString);
     if (url.hostname !== "127.0.0.1" || (url.port && url.port !== "5432")) {
       throw new Error("Local test administration requires the local PostgreSQL cluster.");
@@ -57,7 +57,7 @@ export async function queryTestDatabase(sql: string, connectionString: string): 
     const expected = decodeURIComponent(new URL(connectionString).pathname.slice(1));
     const actual = await client.query<{ name: string }>("SELECT current_database() AS name");
     if (actual.rows[0]?.name !== expected) throw new Error("Integration test connection resolved to an unexpected database.");
-    const result = await client.query(sql);
+    const result = await client.query({ text: sql, rowMode: "array" });
     const results: pg.QueryResult[] = Array.isArray(result) ? result : [result];
     return results.flatMap((entry) => (entry.rows ?? []).map((row) => Object.values(row).map((value) =>
       value == null ? "" : typeof value === "boolean" ? (value ? "t" : "f") : String(value),
