@@ -108,6 +108,9 @@ a:hover { text-decoration:underline; }
 .customer main.sheet>h1 { display:none; }
 .welcome-heading h1 { font-size:clamp(36px,5vw,52px); letter-spacing:-.045em; margin:8px 0 14px; }
 .welcome-heading>p:last-child { color:var(--muted); font-size:18px; margin:0; }
+.setup-progress { margin:32px 0; padding:28px; border:1px solid #e5e5ea; border-radius:24px; background:#fff; }
+.milestone-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; }.milestone-heading h2 { font-size:21px; margin:0; }.milestone-heading>span { font-size:12px; color:var(--blue); }.setup-progress>p { color:var(--muted); line-height:1.6; max-width:760px; }
+.milestones { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:20px; list-style:none; padding:0; margin:26px 0; }.milestones li { display:flex; gap:10px; color:var(--muted); }.milestone-number { flex-shrink:0; width:28px; height:28px; border:1px solid #d2d2d7; border-radius:50%; display:grid; place-items:center; font-size:12px; }.milestones strong { display:block; font-size:13px; font-weight:500; }.milestones small { display:block; font-size:11px; margin-top:5px; }.milestones .complete .milestone-number { background:var(--ink); color:white; border-color:var(--ink); }.milestones .current { color:var(--blue); }.milestones .current .milestone-number { border-color:var(--blue); background:#f0f6ff; }
 .progress { display:flex; padding:0; list-style:none; margin:40px 0; gap:48px; font-size:13px; color:var(--muted); }
 .progress li { display:flex; align-items:center; gap:10px; }
 .progress span { border:1px solid #d2d2d7; border-radius:50%; width:26px; height:26px; display:grid; place-items:center; font-size:11px; }
@@ -498,17 +501,55 @@ function mailIcon(): string {
   return `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="6" y="12" width="36" height="26" rx="7" stroke="currentColor" stroke-width="2"/><path d="m8 15 13 11a5 5 0 0 0 6 0l13-11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 }
 
+export function setupProgress(view: CustomerPortalView): { current: number; complete: boolean; note: string } {
+  const installed = view.onboardingState === "installed" || ["succeeded", "tls_pending"].includes(view.installerStatus ?? "");
+  const complete = view.installerStatus === "succeeded";
+  let current = !view.domainName ? 1 : !view.dnsState && !view.onboardingState ? 2
+    : !view.onboardingState || view.onboardingState === "waiting_resources" ? 3
+    : installed ? 6
+    : view.onboardingState === "installing" || (view.brevoAuthenticated && view.brevoVerified) || ["INSTALLER_UNAVAILABLE", "INSTALLER_STORAGE_UNAVAILABLE"].includes(view.onboardingError ?? "") ? 5 : 4;
+  const credentialNeeded = ["DNS_CREDENTIAL_REQUIRED", "DNS_PROVIDER_CHANGED"].includes(view.onboardingError ?? "");
+  if (credentialNeeded) current = 2;
+  const notes = [
+    "Your BearPortal account is ready.",
+    "Add the domain you want to use for email.",
+    "Connect your domain provider and authorize setup once. We’ll save your progress and handle the remaining steps automatically.",
+    view.onboardingState === "waiting_resources"
+      ? "Waiting for a server or mail-service account. We can’t give a completion time until capacity is available; setup will resume automatically."
+      : "We’ll reserve a server and mail-service account when setup starts.",
+    view.onboardingError === "DNS_PROPAGATION"
+      ? "Verification records have been submitted. DNS changes often appear within minutes, but can take up to 48 hours. We’ll keep checking automatically."
+      : "We’re adding domain verification records and checking them with the mail service. DNS verification can take minutes to hours.",
+    "Bearmail installation usually takes several minutes once domain verification finishes. Allow extra time for downloads and server preparation.",
+    "Bearmail is installed. We’re checking secure HTTPS connections for the admin and webmail sites. Certificate issuance can take several minutes, or longer while DNS updates spread.",
+  ];
+  const note = complete ? "Installation and secure connections are ready. Reveal your administrator credentials below, create mailboxes, then test sending and receiving mail."
+    : credentialNeeded ? "Reconnect your domain provider below. Your setup authorization and place in line are saved."
+    : view.onboardingState === "attention" ? "Setup is paused for our team to review an issue. Your progress is saved; no completion estimate is available yet. You don’t need to authorize setup again."
+    : notes[current];
+  return { current, complete, note };
+}
+
+function renderSetupProgress(view: CustomerPortalView): string {
+  const { current, complete, note } = setupProgress(view);
+  const labels = ["Your account", "Your domain", "Provider connection", "Resource allocation", "Domain authentication", "Bearmail installation", "Secure connections"];
+  return `<section class="setup-progress" aria-labelledby="setup-progress-title"><div class="milestone-heading"><h2 id="setup-progress-title">${complete ? "Your setup is complete" : `Step ${current + 1} of ${labels.length} · ${labels[current]}`}</h2><span>${complete ? "Complete" : view.onboardingState === "attention" ? "Needs attention" : view.onboardingState === "waiting_resources" ? "Waiting" : "In progress"}</span></div><p role="status">${escapeHtml(note)}</p><ol class="milestones" aria-label="Setup progress">${labels.map((label, i) => {
+    const done = complete || i < current;
+    const active = !complete && i === current;
+    return `<li class="${done ? "complete" : active ? "current" : "upcoming"}"${active ? ' aria-current="step"' : ''}><span class="milestone-number" aria-hidden="true">${done ? "✓" : i + 1}</span><div><strong>${label}</strong><small>${done ? "Complete" : active ? view.onboardingState === "attention" ? "Needs attention" : "Current step" : "Up next"}</small></div></li>`;
+  }).join("")}</ol><p class="fine">${complete ? "Mailbox access and mail delivery still need to be tested." : "Timing is an estimate, not a deadline. Progress refreshes automatically; you can close this page and return later."}</p></section>`;
+}
+
 export function renderCustomerPortal(view: CustomerPortalView): string {
   const domain = view.domainName ?? "";
   const hasServer = Boolean(view.serverId || view.allocationState === "allocated");
   const waiting = view.onboardingState === "waiting_resources";
   const requested = Boolean(view.onboardingState);
   const installed = view.onboardingState === "installed" || view.installerStatus === "succeeded" || view.installerStatus === "tls_pending";
-  const busy = requested && !installed && view.onboardingState !== "attention";
-  const step = installed ? 3 : requested || view.dnsState ? 2 : 1;
+  const busy = requested && (view.installerStatus !== "succeeded");
   const title = installed ? "Your mail is taking shape." : requested ? "We’re on it." : "Let’s make it yours.";
   const subtitle = installed ? `Bearmail is installed for ${domain}.` : requested ? "Your setup is saved. We’ll take it from here." : "A few simple steps. A place for all your mail.";
-  const progress = `<ol class="progress" aria-label="Setup progress">${["Your account","Your domain","Your Bearmail"].map((label,i)=>`<li class="${i<step?"complete":""} ${i===step?"current":""}" ${i===step?'aria-current="step"':""}><span>${i<step?'✓':i+1}</span>${label}</li>`).join("")}</ol>`;
+  const progress = renderSetupProgress(view);
   const shortage = !hasServer || view.missingResource === "relay" || view.missingResource === "server_and_relay";
   const capacity = shortage && !installed ? `<aside class="capacity-note" role="status"><span class="status-dot amber"></span><div><strong>A little more room is on the way.</strong><p>Resources are tight right now. ${requested ? `Your setup is saved. ${view.missingResource === "server" ? "Your mail-service account is reserved. We’re checking server availability and will continue automatically." : view.missingResource === "relay" ? "Your server is reserved. We’ll continue as soon as a mail-service account is available." : "We’ll deploy it as soon as a server and mail-service account are available."} You don’t need to submit it again.` : "You can connect your domain now. We’ll save your place and deploy as soon as capacity is available."}</p></div></aside>` : "";
   let card: string;

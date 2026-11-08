@@ -26,6 +26,8 @@ After installation, the owner can reveal the generated administrator username/pa
 6. BearPortal downloads a resolved Bearmail `main` commit and runs the noninteractive Python program `bearmail-install` for dry-run and apply over SSH as `bearadmin`.
 7. The installer configures services and mail DNS. BearPortal records results, checks both HTTPS hostnames and clears TLS-pending status when they are ready. Installation and HTTPS success do not establish mail delivery.
 
+The customer portal shows seven setup milestones: account, domain, provider connection, resource allocation, domain authentication, Bearmail installation and secure connections. It highlights the current step, explains waits or review needs, and gives timing guidance without promising a completion deadline. Installation is shown as complete after HTTPS checks succeed; mailbox access and mail delivery still require testing.
+
 The customer can close the browser during setup. Known retryable failures continue automatically; interrupted host operations with unknown outcomes require operator review. Backend installation issues do not ask the customer to authorize each step again or resubmit a working credential.
 
 ## Operator inventory
