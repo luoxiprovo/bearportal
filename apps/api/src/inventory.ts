@@ -318,6 +318,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
         );
         if (duplicateRef.rows[0]) throw new HttpError(409, "DUPLICATE_PROVIDER_REFERENCE", "That provider reference is already in inventory.");
       }
+      const label = body.label ?? await nextInventoryLabel(db, "s");
       const id = randomUUID();
       await db.query(
         `INSERT INTO servers (
@@ -325,7 +326,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
          ) VALUES ($1, $2, $3::inet, $4, $5, $6, 'pending_validation', $7::jsonb, 1)`,
         [
           id,
-          body.label,
+          label,
           publicIpv4,
           body.profileCode,
           body.providerReference ?? null,
@@ -334,7 +335,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
         ],
       );
       await ctx.audit(db, request, actor.userId, null, "server.register", id, {
-        label: body.label,
+        label,
         publicIpv4,
         profileCode: body.profileCode,
       });
@@ -883,6 +884,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
       const route = "POST /v1/admin/relay-connections";
       const replayed = await ctx.replay(db, actor.userId, route, idempotencyKey, body);
       if (replayed) return replayed;
+      const label = body.label ?? await nextInventoryLabel(db, "b");
       const apiFile = ctx.secrets.write(JSON.stringify({ apiKey: body.apiKey }));
       const smtpFile = ctx.secrets.write(JSON.stringify({ smtpKey: body.smtpKey }));
       const apiRef = randomUUID();
@@ -900,12 +902,12 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
         `INSERT INTO relay_connections (
            id, provider, label, provider_account_id, api_secret_ref, smtp_secret_ref, smtp_login, daily_limit, state
          ) VALUES ($1, 'brevo', $2, $3, $4, $5, $6, $7, 'inactive')`,
-        [id, body.label, body.loginEmail.toLowerCase(), apiRef, smtpRef, body.smtpLogin, body.dailyLimit],
+        [id, label, body.loginEmail.toLowerCase(), apiRef, smtpRef, body.smtpLogin, body.dailyLimit],
       );
-      await ctx.audit(db, request, actor.userId, null, "relay.create", id, { label: body.label, loginEmail: body.loginEmail.toLowerCase() });
+      await ctx.audit(db, request, actor.userId, null, "relay.create", id, { label, loginEmail: body.loginEmail.toLowerCase() });
       const response = {
         id,
-        label: body.label,
+        label,
         loginEmail: body.loginEmail.toLowerCase(),
         smtpLogin: body.smtpLogin,
         dailyLimit: body.dailyLimit,
@@ -2097,4 +2099,13 @@ async function replaceSecret(db: Db, existingId: string | null, purpose: string,
   }
   await db.query(`UPDATE secret_refs SET file_name = $2, version = version + 1 WHERE id = $1`, [existingId, fileName]);
   return existingId;
+}
+
+// The row update serializes concurrent additions and rolls back with a failed creation.
+async function nextInventoryLabel(db: Db, prefix: "s" | "b"): Promise<string> {
+  const result = await db.query<{ value: string }>(
+    "UPDATE inventory_name_counters SET value=value+1 WHERE prefix=$1 RETURNING value::text",
+    [prefix],
+  );
+  return `${prefix}-${result.rows[0].value}`;
 }

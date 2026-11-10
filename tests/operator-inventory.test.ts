@@ -21,6 +21,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
   await query(
     "TRUNCATE users,organizations,servers,relay_connections,domains,secret_refs,deployments,jobs,operator_roles,allocation_requests,invitations,idempotency_keys,audit_events,outbox_events CASCADE",
   );
+  await query("UPDATE inventory_name_counters SET value=0");
   await query("UPDATE control_plane_state SET mode='normal' WHERE id=1");
   const pair = await generateKeyPair("RS256", { extractable: true });
   const issuer = "https://test.operator.local",
@@ -143,7 +144,6 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
       }).toString(),
     });
   const serverFields = {
-    label: "Mail <script>alert(1)</script>",
     publicIpv4: "8.8.4.4",
     operatorContact: "ops@example.org",
     providerReference: "instance-1",
@@ -222,7 +222,9 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
       url: "/operator",
       headers: { authorization: "Bearer " + tokens.admin },
     });
-    assert.ok(page.body.includes("Mail &lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert.ok(page.body.includes("s-1"));
+    assert.deepEqual(await query("SELECT label FROM servers"), [["s-1"]]);
+    assert.equal(page.body.includes('placeholder="Mail server · US West"'), false);
     assert.equal(page.body.includes("<script>alert(1)</script>"), false);
     assert.ok(page.body.includes("data-resource-search"));
     assert.ok(page.body.includes("SHA256:test-fingerprint"));
@@ -333,6 +335,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
     const assignedServer = (
       await query("SELECT id FROM servers WHERE state='available'")
     )[0][0];
+    assert.deepEqual(await query(`SELECT label FROM servers WHERE id=${q(assignedServer)}`), [["s-2"]]);
     const org = randomUUID();
     await query(
       `INSERT INTO organizations(id,owner_user_id,name,status) VALUES(${q(org)},${q(admin.userId)},'Northstar Studio','active'); INSERT INTO server_assignments(id,organization_id,server_id,reason) VALUES(${q(randomUUID())},${q(org)},${q(assignedServer)},'Inventory test'); UPDATE servers SET state='assigned',tenant_tainted_at=now() WHERE id=${q(assignedServer)}`,
@@ -373,7 +376,6 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
     const apiKey = "API-key-private-CANARY-operator",
       smtpKey = "SMTP-key-private-CANARY-operator";
     const account = {
-      label: "Brevo One",
       loginEmail: "brevo@example.org",
       smtpLogin: "login@smtp-brevo.com",
       dailyLimit: "300",
@@ -411,7 +413,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
       url: "/operator?tab=brevo",
       headers: { authorization: "Bearer " + tokens.admin },
     });
-    assert.ok(accountPage.body.includes("Brevo One"));
+    assert.ok(accountPage.body.includes("b-1"));
     for (const secret of [apiKey, smtpKey])
       assert.equal(accountPage.body.includes(secret), false);
     assert.ok(
@@ -701,6 +703,18 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
     });
     assert.ok(portalAfterCli.body.includes("CLI Brevo"));
     assert.ok(portalAfterCli.body.includes("CLI server"));
+    const automaticBrevoKey = randomUUID();
+    const secondAutomaticBrevo = await json("POST", "/v1/admin/relay-connections", {
+      ...account, dailyLimit: 300, loginEmail: "second@example.org",
+    }, "admin", automaticBrevoKey);
+    assert.equal(secondAutomaticBrevo.statusCode, 201, secondAutomaticBrevo.body);
+    assert.equal(secondAutomaticBrevo.json().label, "b-2");
+    const repeatedBrevo = await json("POST", "/v1/admin/relay-connections", {
+      ...account, dailyLimit: 300, loginEmail: "second@example.org",
+    }, "admin", automaticBrevoKey);
+    assert.equal(repeatedBrevo.json().id, secondAutomaticBrevo.json().id);
+    assert.deepEqual(await query("SELECT value FROM inventory_name_counters WHERE prefix='b'"), [["2"]]);
+
     await assert.rejects(
       runInventory(["servers", "add", "--file", brevoFile], cliConfig),
       /Invalid inventory fields/,
@@ -815,7 +829,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
     assert.match(failedPage.body,/SSH check failed/);
     assert.match(failedPage.body,/host key differs from the saved key/);
     assert.match(failedPage.body,/server.host_key_mismatch/);
-    assert.deepEqual(await query("SELECT state FROM servers WHERE label='Failed SSH server'"),[["pending_validation"]]);
+    assert.deepEqual(await query("SELECT state FROM servers WHERE provider_reference='failed-ssh-test'"),[["pending_validation"]]);
 
   } finally {
     await app.close();

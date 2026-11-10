@@ -544,7 +544,6 @@ export function registerOperatorInventory(
       "POST",
       "/v1/admin/servers",
       {
-        label: input.label,
         publicIpv4: input.publicIpv4,
         profileCode: "e2-micro",
         operatorContact: input.operatorContact,
@@ -616,7 +615,6 @@ export function registerOperatorInventory(
       "POST",
       "/v1/admin/relay-connections",
       {
-        label: input.label || input.loginEmail,
         loginEmail: input.loginEmail,
         apiKey: input.apiKey,
         smtpLogin: input.smtpLogin,

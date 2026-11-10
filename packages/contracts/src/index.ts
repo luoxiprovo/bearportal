@@ -154,7 +154,7 @@ export const preparationAttestationsSchema = z.object({
 }).strict();
 
 export const serverCreateSchema = z.object({
-  label: z.string().min(1).max(120),
+  label: z.string().min(1).max(120).optional(),
   publicIpv4: z.string().min(7).max(15),
   profileCode: z.string().min(1).max(64),
   operatorContact: z.string().min(3).max(200),
@@ -227,7 +227,7 @@ export const hostEnrollSchema = z.object({
 }).strict();
 
 export const relayConnectionCreateSchema = z.object({
-  label: z.string().min(1).max(120),
+  label: z.string().min(1).max(120).optional(),
   loginEmail: z.string().email(),
   apiKey: z.string().min(1).max(400),
   smtpLogin: z.string().min(1).max(200),
