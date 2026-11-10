@@ -237,9 +237,20 @@ test("Identity Platform Google and password signup verify email, preserve legacy
       ).statusCode,
       400,
     );
+    const signupCallsBefore = calls.filter(call => call === "signup").length;
+    for (const confirmation of [undefined, "a-different-password"]) {
+      const mismatch = await post("/auth/signup", {
+        email: "new@example.org", password,
+        ...(confirmation === undefined ? {} : { confirmPassword: confirmation }),
+      });
+      assert.equal(mismatch.statusCode, 400, mismatch.body);
+      if (confirmation !== undefined) assert.equal(mismatch.json().error.code, "PASSWORD_MISMATCH");
+    }
+    assert.equal(calls.filter(call => call === "signup").length, signupCallsBefore, "mismatched or missing confirmation must not create an upstream account");
     const signup = await post("/auth/signup", {
       email: "new@example.org",
       password,
+      confirmPassword: password,
     });
     assert.equal(signup.statusCode, 200, signup.body);
     assert.equal(signup.json().state, "verify_email");

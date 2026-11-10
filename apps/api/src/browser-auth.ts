@@ -167,14 +167,20 @@ export function registerBrowserAuth(
       .object({
         email: z.string().trim().email().max(200),
         password: z.string().min(12).max(256),
+        confirmPassword: z.string().min(12).max(256),
       })
       .strict()
       .parse(request.body);
-    const tokens = await client.password(
-      body.email.toLowerCase(),
-      body.password,
-      true,
-    );
+    if (body.password !== body.confirmPassword)
+      throw new HttpError(400, "PASSWORD_MISMATCH", "Passwords do not match. Enter the same password in both fields.");
+    let tokens: IdentityTokens;
+    try {
+      tokens = await client.password(body.email.toLowerCase(), body.password, true);
+    } catch (error) {
+      if (error instanceof HttpError)
+        request.log.warn({ code: error.code, status: error.status }, "Email/password registration failed");
+      throw error;
+    }
     const result = await finish(request, reply, tokens, origin);
     if (result.state === "verify_email") {
       try {

@@ -148,6 +148,23 @@ export function createIdentityPlatformClient(
           "AUTH_UNAVAILABLE",
           "Sign-in is temporarily unavailable. Please try again.",
         );
+      if (method === "signUp") {
+        if (["WEAK_PASSWORD", "PASSWORD_DOES_NOT_MEET_REQUIREMENTS"].includes(code))
+          throw new HttpError(
+            400,
+            "PASSWORD_REQUIREMENTS",
+            "Choose a stronger password with at least 12 characters, including uppercase and lowercase letters, a number and a symbol.",
+          );
+        if (code === "INVALID_EMAIL")
+          throw new HttpError(400, "INVALID_EMAIL", "Enter a valid email address.");
+        if (["ADMIN_ONLY_OPERATION", "ADMIN_RESTRICTED_OPERATION"].includes(code))
+          throw new HttpError(503, "SIGN_UP_DISABLED", "New account registration is not enabled. Contact the operator.");
+        throw new HttpError(
+          400,
+          "SIGN_UP_FAILED",
+          "Account creation could not be completed. If you registered before, including with Google, sign in instead or use password reset. Otherwise, check your email and password and try again.",
+        );
+      }
       throw new HttpError(
         401,
         "SIGN_IN_FAILED",
