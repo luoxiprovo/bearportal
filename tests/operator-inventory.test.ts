@@ -145,7 +145,6 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
     });
   const serverFields = {
     publicIpv4: "8.8.4.4",
-    operatorContact: "ops@example.org",
     providerReference: "instance-1",
     osPrepared: "1",
     storagePrepared: "1",
@@ -214,6 +213,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
     assert.equal(added.statusCode, 200, added.body);
     assert.ok(added.json().redirect.includes("server-added"));
     assert.equal(probes, 1);
+    assert.deepEqual(await query("SELECT operator_contact IS NULL FROM servers"), [["t"]]);
     const id = (await query("SELECT id FROM servers"))[0][0];
     let version = Number(
       (await query(`SELECT version FROM servers WHERE id=${q(id)}`))[0][0],
@@ -223,6 +223,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
       headers: { authorization: "Bearer " + tokens.admin },
     });
     assert.ok(page.body.includes("s-1"));
+    assert.match(page.body, /Operator contact \(optional\)/);
     assert.deepEqual(await query("SELECT label FROM servers"), [["s-1"]]);
     assert.equal(page.body.includes('placeholder="Mail server · US West"'), false);
     assert.equal(page.body.includes("<script>alert(1)</script>"), false);

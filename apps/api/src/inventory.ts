@@ -330,7 +330,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
           publicIpv4,
           body.profileCode,
           body.providerReference ?? null,
-          body.operatorContact,
+          body.operatorContact ?? null,
           JSON.stringify(body.preparationAttestations),
         ],
       );

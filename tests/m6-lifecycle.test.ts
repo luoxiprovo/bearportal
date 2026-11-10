@@ -609,7 +609,8 @@ describe("M6 lifecycle policy", () => {
     const installationSource = readFileSync(new URL("../apps/api/src/installation.ts", import.meta.url), "utf8");
     const mainSource = readFileSync(new URL("../apps/api/src/main.ts", import.meta.url), "utf8");
     // Browser form submission uses fetch; server-side renderers still have no provider effects.
-    assert.ok(portalSource.includes("fetch(form.action"));
+    const inventoryFormSource = readFileSync(new URL("../apps/api/src/inventory-form-script.ts", import.meta.url), "utf8");
+    assert.ok(inventoryFormSource.includes("fetch(form.action"));
     for (const source of [lifecycleSource, portalSource.replace(/const ADMIN_LOGIN_SCRIPT=`[\s\S]*?`;/, "").split("const INVENTORY_SCRIPT")[0], installationSource, mainSource]) {
       assert.equal(source.includes("generate("), false);
       assert.doesNotMatch(source, /child_process|\bfetch\s*\(|mail_verified\s*=\s*true|writeZone|applyZone|publishZone/);

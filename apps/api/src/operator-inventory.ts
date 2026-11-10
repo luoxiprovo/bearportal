@@ -87,7 +87,7 @@ export function registerOperatorInventory(
             state: string;
             public_ipv4: string;
             label: string;
-            operator_contact: string;
+            operator_contact: string | null;
             provider_reference: string | null;
             tainted: boolean;
           }>(
@@ -159,7 +159,7 @@ export function registerOperatorInventory(
           [
             id,
             body.label ?? row.label,
-            body.operatorContact ?? row.operator_contact,
+            body.operatorContact === undefined ? row.operator_contact : body.operatorContact,
             reference,
             ipv4,
             addressChanged,
@@ -546,7 +546,7 @@ export function registerOperatorInventory(
       {
         publicIpv4: input.publicIpv4,
         profileCode: "e2-micro",
-        operatorContact: input.operatorContact,
+        ...(input.operatorContact?.trim() ? { operatorContact: input.operatorContact.trim() } : {}),
         ...(input.providerReference
           ? { providerReference: input.providerReference }
           : {}),
@@ -574,7 +574,7 @@ export function registerOperatorInventory(
       {
         expectedVersion: version(request),
         label: input.label,
-        operatorContact: input.operatorContact,
+        operatorContact: input.operatorContact?.trim() || null,
         providerReference: input.providerReference || null,
         publicIpv4: input.publicIpv4,
       },

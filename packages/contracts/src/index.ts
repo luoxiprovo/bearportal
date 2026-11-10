@@ -157,7 +157,7 @@ export const serverCreateSchema = z.object({
   label: z.string().min(1).max(120).optional(),
   publicIpv4: z.string().min(7).max(15),
   profileCode: z.string().min(1).max(64),
-  operatorContact: z.string().min(3).max(200),
+  operatorContact: z.string().trim().min(3).max(200).optional(),
   providerReference: z.string().min(1).max(200).optional(),
   preparationAttestations: preparationAttestationsSchema,
 }).strict();
@@ -416,7 +416,7 @@ export const usageReportSchema = z.object({
 export const serverInventoryPatchSchema = z.object({
   expectedVersion: z.number().int().positive(),
   label: z.string().trim().min(1).max(120).optional(),
-  operatorContact: z.string().trim().min(3).max(200).optional(),
+  operatorContact: z.string().trim().min(3).max(200).nullable().optional(),
   providerReference: z.string().trim().min(1).max(200).nullable().optional(),
   publicIpv4: z.string().min(7).max(15).optional(),
 }).strict().refine(value => Object.keys(value).length > 1, "Include a field to update.");

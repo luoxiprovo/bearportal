@@ -47,3 +47,24 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
   assert.match(ready, /Mail delivery and mailbox access still need verification/);
   assert.doesNotMatch(ready, /location.reload/);
 });
+
+
+test("Brevo verification animates during work and automatic waits while preserving the status text", () => {
+  const connected = { ...base, domainName: "example.com", dnsState: "stored" };
+  for (const state of [
+    { onboardingState: "queued" },
+    { onboardingState: "queued", onboardingError: "DNS_PROPAGATION" },
+    { onboardingState: "queued", onboardingError: "BREVO_UNAVAILABLE" },
+    { onboardingState: "waiting_resources" },
+  ] as const) {
+    const html = renderCustomerPortal({ ...connected, ...state });
+    assert.match(html, /Step 1 of 2 · Verifying Brevo domain/);
+    assert.match(html, /class="milestone-number working-spinner" aria-hidden="true"><\/span><div><strong>Verifying Brevo domain/);
+    if (state.onboardingState === "queued" && !state.onboardingError) assert.match(html, /<small>Working<\/small>/);
+    else assert.match(html, /class="waiting-status">Waiting/);
+    assert.match(html, /class="setup-timing">The whole process, including domain records taking effect, may take about 7 minutes/);
+  }
+  const paused = renderCustomerPortal({ ...connected, onboardingState: "attention", onboardingError: "DNS_ZONE_NOT_FOUND" });
+  assert.doesNotMatch(paused, /class="milestone-number working-spinner"/);
+  assert.match(paused, /Paused · needs attention/);
+});

@@ -1331,7 +1331,7 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
     label: string;
     public_ipv4: string | null;
     owner_id: string | null;
-    operator_contact: string;
+    operator_contact: string | null;
     provider_reference: string | null;
     profile_code: string;
     last_heartbeat_at: Date | null;
