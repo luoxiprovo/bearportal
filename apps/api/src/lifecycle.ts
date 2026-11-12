@@ -35,6 +35,7 @@ import {
   recordLines,
   renderCustomerPortal,
   renderOperatorPortal,
+  renderOperatorAuth,
   type ActivityLine,
   type BackupLine,
   type CustomerPortalView,
@@ -333,13 +334,22 @@ export function registerLifecycleRoutes(app: FastifyInstance, ctx: LifecycleCont
   });
 
   app.get("/operator", async (request, reply) => {
+    try {
     const html = await ctx.withActor(request, "operator", async (db, actor) => {
       ctx.requireVerified(actor);
       const query = request.query as {tab?:string;notice?:string};
-      return renderOperatorPortal({...await operatorView(db, actor.roles),activeTab:query.tab === "users"?"users":query.tab === "brevo"?"brevo":"servers",notice:query.notice});
+      return renderOperatorPortal({...await operatorView(db, actor.roles),browserAuthEnabled:ctx.browserAuthEnabled,activeTab:query.tab === "users"?"users":query.tab === "brevo"?"brevo":"servers",notice:query.notice});
     });
     reply.type("text/html; charset=utf-8");
-    return reply.send(html);
+    return reply.header("cache-control","no-store").send(html);
+    }catch(error){
+      if(ctx.browserAuthEnabled&&error instanceof HttpError){
+        if(error.status===401)return reply.code(303).header("location","/operator/login").send("");
+        if(error.code==="MFA_REQUIRED")return reply.code(303).header("location","/operator/security").send("");
+        if(error.code==="FORBIDDEN")return reply.code(403).type("text/html").header("cache-control","no-store").send(renderOperatorAuth(false,true));
+      }
+      throw error;
+    }
   });
 
   app.get("/v1/admin/release-checklist", async (request) => {

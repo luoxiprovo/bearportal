@@ -23,3 +23,5 @@ These procedures describe the current code. They do not imply that every lifecyc
 | Oversight sessions and model limits | [oversight.md](oversight.md) |
 
 BearPortal can write Brevo verification DNS through trusted forms and execute Bearmail over SSH. The installer publishes mail DNS including MX. Guided setup has an in-process persistent onboarding queue with automatic capacity retries. There is no live Grok loop, general host-command delivery worker, cloud lifecycle adapter or platform notification sender. Read [../local-validation.md](../local-validation.md) for demonstrated coverage.
+
+Production operator access: [operator-login.md](operator-login.md).

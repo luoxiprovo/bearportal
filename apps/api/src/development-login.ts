@@ -30,9 +30,10 @@ export function registerDevelopmentLogin(
   app: FastifyInstance,
   enabled: boolean,
   file: URL = developmentLoginFile,
+  productionLogin?: () => string,
 ) {
   app.get("/operator/login", async (_request, reply) => {
-    if (!enabled) return reply.code(404).send({ error: "Not found" });
+    if (!enabled) return productionLogin ? reply.type("text/html; charset=utf-8").header("cache-control","no-store").header("referrer-policy","no-referrer").send(productionLogin()) : reply.code(404).send({ error: "Not found" });
     return reply
       .header("cache-control", "no-store")
       .header("referrer-policy", "no-referrer")

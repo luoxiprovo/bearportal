@@ -1,3 +1,4 @@
+import {consumeOperatorAuthorization,grantPendingOperatorRole} from "./operator-authorization.ts";
 import { randomUUID } from "node:crypto";
 import { allocateProfile } from "../../../packages/servers/src/allocate.ts";
 import { mutationsPaused } from "./oversight.ts";
@@ -51,7 +52,8 @@ export async function completeIdentityAccount(
       "bearportal.identity." + claims.iss + "." + claims.sub,
     ]);
     await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["bearportal.email." + email]);
-    let user = (
+    const approved = await consumeOperatorAuthorization(db,ctx,claims,request,allowLegacyLink);
+    let user = approved ?? (
       await db.query<{ id: string; status: string }>(
         `SELECT u.id,u.status FROM identity_accounts a JOIN users u ON u.id=a.user_id WHERE a.issuer=$1 AND a.subject=$2`,
         [claims.iss, claims.sub],
@@ -97,19 +99,22 @@ export async function completeIdentityAccount(
           ],
         );
       }
-      await db.query(
-        "INSERT INTO identity_accounts(issuer,subject,user_id,provider) VALUES($1,$2,$3,$4)",
-        [claims.iss, claims.sub, user.id, claims.firebase.sign_in_provider],
-      );
-      await ctx.audit(db, request, user.id, null, "identity.connect", user.id, {
-        provider: claims.firebase.sign_in_provider,
-        legacyAccountLinked: Boolean(legacy),
-      });
     }
+    const binding=(await db.query("SELECT user_id FROM identity_accounts WHERE issuer=$1 AND subject=$2",[claims.iss,claims.sub])).rows[0];
+    if(!binding){
+      await db.query("INSERT INTO identity_accounts(issuer,subject,user_id,provider) VALUES($1,$2,$3,$4)",[claims.iss,claims.sub,user.id,claims.firebase.sign_in_provider]);
+      await ctx.audit(db,request,user.id,null,"identity.connect",user.id,{provider:claims.firebase.sign_in_provider,operatorAuthorization:Boolean(approved)});
+    }
+    await grantPendingOperatorRole(db,ctx,claims,request,user.id);
     await db.query(
       "UPDATE users SET verified_email=$2,email_verified=true,updated_at=now() WHERE id=$1",
       [user.id, email],
     );
+    const roles=(await db.query<{role:string}>("SELECT role FROM operator_roles WHERE user_id=$1 AND revoked_at IS NULL",[user.id])).rows;
+    if(roles.length){
+      await ctx.audit(db,request,user.id,null,"identity.sign_in",user.id,{provider:claims.firebase.sign_in_provider});
+      return {organizationId:null,operator:true};
+    }
     let org = (
       await db.query<{ id: string }>(
         "SELECT id FROM organizations WHERE owner_user_id=$1 AND status='active'",
@@ -148,6 +153,6 @@ export async function completeIdentityAccount(
     await ctx.audit(db, request, user.id, org.id, "identity.sign_in", user.id, {
       provider: claims.firebase.sign_in_provider,
     });
-    return { organizationId: org.id };
+    return { organizationId: org.id,operator:false };
   });
 }

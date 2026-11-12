@@ -1,3 +1,4 @@
+import {cookieValue} from "./auth-cookies.ts";
 import { registerBilling, requireSubscription, type BillingConfig } from "./billing.ts";
 import Stripe from "stripe";
 import { registerBrowserAuth } from "./browser-auth.ts";
@@ -47,7 +48,7 @@ import { registerLifecycleRoutes } from "./lifecycle.ts";
 import { registerOversightRoutes } from "./oversight.ts";
 import { backupFreshness } from "../../../packages/operations/src/lifecycle.ts";
 import { signDevIdentity } from "./dev-identity.ts";
-import { renderHome, type HomeState } from "./portal.ts";
+import { renderHome, renderOperatorAuth, type HomeState } from "./portal.ts";
 
 const MFA_WINDOW_SECONDS = 15 * 60;
 const OPERATOR_ROLES = ["support", "infrastructure_operator", "platform_administrator"] as const;
@@ -194,9 +195,10 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
 
   app.get("/", async (_request, reply) => sendHome(reply, 200));
 
-  registerDevelopmentLogin(app, Boolean(deps.devJwtPrivateKeyPem));
+  registerDevelopmentLogin(app, Boolean(deps.devJwtPrivateKeyPem),undefined,deps.identityPlatform?()=>renderOperatorAuth():undefined);
 
   app.get("/register", async (_request, reply) => sendHome(reply, 200));
+  app.get("/operator/security",async(_request,reply)=>reply.type("text/html; charset=utf-8").header("cache-control","no-store").header("referrer-policy","no-referrer").send(renderOperatorAuth(true)));
   app.get("/login", async (_request, reply) => sendHome(reply, 200, {authMode:"signin"}));
 
   app.post("/register", async (request, reply) => {
@@ -319,7 +321,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     if(deps.identityPlatform&&identityClient&&(raw.iss===`https://securetoken.google.com/${deps.identityPlatform.projectId}`||!deps.devJwtPrivateKeyPem)){
       const claims=validatePlatformClaims(await identityClient.verify(token),deps.identityPlatform);
       const subject=await resolveIdentitySubject(inventoryContext,claims);
-      return {...claims,sub:subject};
+      return {...claims,sub:subject,bearportalIdentitySubject:claims.sub};
     }
     try{const {payload}=await jwtVerify(token,publicKey,{issuer:deps.issuer,audience:deps.audience,algorithms:['RS256']});if(typeof payload.sub!=='string'||typeof payload.email!=='string')throw Error();return payload as JWTPayload&{email:string};}
     catch{throw new HttpError(401,"UNAUTHENTICATED","Sign in is required.");}
@@ -411,6 +413,16 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
         organizationId: organizationId || null,
         roles: roleList,
       };
+      if(deps.identityPlatform&&payload.iss===`https://securetoken.google.com/${deps.identityPlatform.projectId}`){
+        // Upstream/custom amr claims cannot substitute for this application's verified MFA session.
+        actor.amr=[];
+        const token=cookieValue(request,"bp_operator_mfa");
+        if(token&&roleList.length){
+          const mfa=(await client.query<{authenticated_at:Date}>(`SELECT authenticated_at FROM operator_mfa_sessions WHERE token_hash=$1 AND user_id=$2 AND identity_issuer=$3 AND identity_subject=$4 AND first_factor_auth_time=$5 AND expires_at>now()`,[hashToken(token),userId,payload.iss,payload.bearportalIdentitySubject,payload.auth_time])).rows[0];
+          if(mfa){actor.amr=["totp"];actor.authTime=Math.floor(mfa.authenticated_at.getTime()/1000)}
+        }
+        if(mode==="operator"&&!actor.amr.includes("totp"))throw new HttpError(403,"MFA_REQUIRED","Confirm your authenticator at /operator/security before opening operator inventory.");
+      }
       consumeLimit(rateHits, actor.userId, "api", 120, 60_000);
       const result = await fn(client, actor);
       await client.query("COMMIT");

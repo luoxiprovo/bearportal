@@ -13,26 +13,10 @@ import type { InventoryContext } from "./inventory.ts";
 import { HttpError } from "./errors.ts";
 import { BROWSER_AUTH_SCRIPT } from "./browser-auth-script.ts";
 
-function cookieValue(request: FastifyRequest, name: string) {
-  const raw = request.headers.cookie
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(name + "="));
-  try {
-    return raw ? decodeURIComponent(raw.slice(name.length + 1)) : "";
-  } catch {
-    return "";
-  }
-}
-function cookie(
-  name: string,
-  value: string,
-  origin: string,
-  path = "/",
-  maxAge?: number,
-) {
-  return `${name}=${encodeURIComponent(value)}; HttpOnly; SameSite=Lax; Path=${path}${origin.startsWith("https:") ? "; Secure" : ""}${maxAge === undefined ? "" : "; Max-Age=" + maxAge}`;
-}
+import {cookieValue,cookie} from "./auth-cookies.ts";
+import {registerOperatorAuth} from "./operator-auth.ts";
+import {hashToken} from "./operator-totp.ts";
+
 function signState(value: string, key: string) {
   return createHmac("sha256", Buffer.from(key, "hex"))
     .update("bearportal.login." + value)
@@ -150,15 +134,16 @@ export function registerBrowserAuth(
       reply.header("set-cookie", cookies);
       return { state: "verify_email", email: claims.email };
     }
-    await completeIdentityAccount(
+    const account=await completeIdentityAccount(
       ctx,
       claims,
       request,
       claims.firebase.sign_in_provider === "password" || authoritativeGoogle,
     );
-    cookies.push(cookie("bp_session", tokens.idToken, origin));
+    await revokeOperatorSession(request);
+    cookies.push(cookie("bp_session", tokens.idToken, origin),cookie("bp_operator_mfa","",origin,"/",0),cookie("bp_operator_enroll","",origin,"/auth",0));
     reply.header("set-cookie", cookies);
-    return { state: "signed_in", redirect: "/portal" };
+    return { state: "signed_in", redirect: account.operator?"/operator/security":"/portal" };
   }
   app.post("/auth/signup", async (request, reply) => {
     const { origin } = authorize(request);
@@ -306,12 +291,20 @@ export function registerBrowserAuth(
     ]);
     return { state: "signed_in", redirect: "/portal" };
   });
+  async function revokeOperatorSession(request:FastifyRequest){
+    const token=cookieValue(request,"bp_operator_mfa");
+    if(token)await ctx.withSystem("inventory_worker",async db=>{await ctx.setActor(db,"platform_administrator");await db.query("DELETE FROM operator_mfa_sessions WHERE token_hash=$1",[hashToken(token)])});
+  }
+  registerOperatorAuth(app,ctx,config,client,keyHex,authorize);
   app.post("/auth/logout", async (request, reply) => {
     const { origin } = authorize(request);
     z.object({})
       .strict()
       .parse(request.body ?? {});
+    await revokeOperatorSession(request);
     reply.header("set-cookie", [
+      cookie("bp_operator_mfa","",origin,"/",0),
+      cookie("bp_operator_enroll","",origin,"/auth",0),
       cookie("bp_session", "", origin, "/", 0),
       cookie("bp_refresh", "", origin, "/auth", 0),
     ]);

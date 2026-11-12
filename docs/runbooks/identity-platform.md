@@ -55,7 +55,7 @@ Public production origins must use HTTPS. Production must also retain the existi
 - An expired managed page session returns to `/login?resume=1`, where the saved refresh session can resume. Identity Platform ID tokens normally expire after one hour; the existing development operator token lifetime and two-hour inventory MFA window are separate.
 - Signup/login does not change the once-only domain setup consent or rerun an installed deployment.
 
-Identity Platform accounts requiring an additional MFA challenge are rejected with an explicit message rather than bypassed; the browser does not currently implement that upstream challenge. Existing operator roles are not granted or linked merely because a Google account has the same email.
+Identity Platform accounts requiring an additional MFA challenge are rejected with an explicit message rather than bypassed; the browser does not currently implement that upstream challenge. Existing operator roles are not granted or linked merely because a Google account has the same email. Production operators use explicit server authorization and BearPortal authenticator verification; see [operator-login.md](operator-login.md).
 
 ## Existing customer accounts
 

@@ -19,7 +19,8 @@
     "inventory": "tsx scripts/local-trial.ts inventory",
     "auth:configure": "tsx scripts/local-trial.ts auth-configure",
     "reset:test-data": "tsx scripts/local-trial.ts reset",
-    "stripe:listen": "tsx scripts/stripe-listen.ts"
+    "stripe:listen": "tsx scripts/stripe-listen.ts",
+    "operator:authorize": "tsx scripts/operator-access.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -31,6 +32,7 @@
     "@ai-sdk/harness-grok-build": "1.0.109",
     "@types/node": "^22.19.0",
     "@types/pg": "^8.15.5",
+    "@types/qrcode": "^1.5.6",
     "ai": "7.0.159",
     "jose": "^6.1.0",
     "pg": "^8.16.3",
