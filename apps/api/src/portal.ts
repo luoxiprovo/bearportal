@@ -92,6 +92,7 @@ a:hover { text-decoration:underline; }
 .nav-auth-message { color:#a33125; font-size:12px; max-width:260px; }
 .brand-dot { color:var(--blue); }
 .landing { max-width:1080px; margin:auto; padding:96px 24px 112px; display:grid; grid-template-columns:1.2fr 1fr; align-items:center; gap:80px; }
+.landing>* { min-width:0; }
 .landing h1 { font-size:clamp(58px,7vw,88px); letter-spacing:-.055em; line-height:1.01; }
 .soft { color:#86868b; }
 .landing .lede { font-size:21px; margin:24px 0; max-width:420px; line-height:1.5; }
@@ -185,7 +186,7 @@ summary { cursor:pointer; color:var(--ink); }
 .notice { padding:18px; border-radius:14px; background:var(--canvas); font-size:14px; margin:24px 0; }
 .notice.error { background:#fff0ed; color:#9f3327; }
 .customer footer { max-width:1080px; color:var(--muted); }
-@media(max-width:760px) { .landing { grid-template-columns:1fr; gap:44px; padding:56px 24px; }.landing h1 { font-size:64px; }.signup-card { padding:30px; }.journey { padding:56px 24px; }.journey-grid { grid-template-columns:1fr; gap:26px; }.journey h2 { font-size:36px; margin-bottom:32px; }.nav { padding:14px 24px; }.nav .demo { display:none; }.progress { gap:16px; font-size:11px; justify-content:space-between; }.progress li { gap:6px; }.onboarding-grid,.details-grid { grid-template-columns:1fr; }.customer section.setup-card { padding:28px; }.setup-summary { padding:20px 6px; }.customer main.sheet { padding:36px 20px; }.home-footer { gap:24px; }.welcome-heading>p:last-child { font-size:16px; } }
+@media(max-width:760px) { .landing { grid-template-columns:1fr; gap:44px; padding:56px 24px; }.landing h1 { font-size:clamp(44px,14vw,64px); }.signup-card { padding:30px; }.journey { padding:56px 24px; }.journey-grid { grid-template-columns:1fr; gap:26px; }.journey h2 { font-size:36px; margin-bottom:32px; }.nav { padding:14px 24px; }.nav .demo { display:none; }.progress { gap:16px; font-size:11px; justify-content:space-between; }.progress li { gap:6px; }.onboarding-grid,.details-grid { grid-template-columns:1fr; }.customer section.setup-card { padding:28px; }.setup-summary { padding:20px 6px; }.customer main.sheet { padding:36px 20px; }.home-footer { gap:24px; }.welcome-heading>p:last-child { font-size:16px; } }
 @media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
 
 

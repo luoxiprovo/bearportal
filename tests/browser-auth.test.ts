@@ -412,6 +412,15 @@ test("Identity Platform Google and password signup verify email, preserve legacy
     assert.equal(logout.statusCode, 200);
     assert.match(String(logout.headers["set-cookie"]), /Max-Age=0/);
     assert.equal((await app.inject("/portal")).statusCode, 303);
+    // Clients behind Caddy must not share one loopback rate-limit bucket.
+    const limitedClient = { "x-forwarded-for": "198.51.100.80" };
+    for (let i = 0; i < 60; i++) {
+      assert.equal((await app.inject({ url: "/auth/options", headers: limitedClient })).statusCode, 200);
+    }
+    assert.equal((await app.inject({ url: "/auth/options", headers: limitedClient })).statusCode, 429);
+    assert.equal((await app.inject({ url: "/auth/options", headers: { "x-forwarded-for": "198.51.100.81" } })).statusCode, 200);
+    // Direct remote connections cannot impersonate a client using forwarded headers.
+    assert.equal((await app.inject({ url: "/auth/options", remoteAddress: "203.0.113.50", headers: limitedClient })).statusCode, 200);
     for (const canary of [password, refreshSecret, googleCredential]) {
       assert.equal(Buffer.concat(logs).toString().includes(canary), false);
       assert.equal(

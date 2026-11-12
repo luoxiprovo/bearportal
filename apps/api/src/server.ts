@@ -122,6 +122,8 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
   const identityClient=deps.identityPlatform?(deps.identityPlatformClient??createIdentityPlatformClient(deps.identityPlatform)):undefined;
   const rateHits = new Map<string, number[]>();
   const app = Fastify({
+    // Caddy runs locally; keep authentication limits scoped to the actual client.
+    trustProxy: ["127.0.0.1", "::1"],
     logger: {
       level: "info",
       redact: {
