@@ -631,6 +631,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     const pair = await generateKeyPair("RS256", { extractable: true });
     privateKey = pair.privateKey;
     const deps: ApiDeps = {
+    billingRequired: false,
       onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir: mkdtempSync(join(tmpdir(), "bearportal-m6-secrets-")),
@@ -945,6 +946,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
   it("registers from the development home page and opens the portal", async () => {
     const pair = await generateKeyPair("RS256", { extractable: true });
     const local = await buildServer({
+    billingRequired: false,
       onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir: mkdtempSync(join(tmpdir(), "bearportal-m6-register-")),
@@ -995,7 +997,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
       assert.equal(portal.status, 200);
       const portalText = await portal.text();
       assert.ok(portalText.includes("Let’s make it yours."));
-      assert.ok(portalText.includes("Waiting for capacity"));
+      assert.ok(portalText.includes("Allocated during setup"));
       assert.ok(portalText.includes("operator-reported"));
       assert.ok(portalText.includes('<script src="/assets/customer-session.js" defer></script>'));
       assert.equal(portalText.includes("<script>"), false);

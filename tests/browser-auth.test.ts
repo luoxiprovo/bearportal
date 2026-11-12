@@ -135,6 +135,7 @@ test("Identity Platform Google and password signup verify email, preserve legacy
   const secretsDir = mkdtempSync(join(tmpdir(), "bearportal-auth-"));
   const app = await buildServer(
     {
+      billingRequired: false,
       databaseUrl,
       secretsDir,
       secretKeyHex: "ab".repeat(32),
@@ -333,6 +334,11 @@ test("Identity Platform Google and password signup verify email, preserve legacy
     });
     assert.deepEqual(resetExisting.json(), resetUnknown.json());
     assert.equal(resetUnknown.statusCode, 200);
+    const beforeDuplicate = calls.filter(call=>call === "signup").length;
+    const duplicateSignup = await post("/auth/signup", { email: "NEW@example.org", password, confirmPassword: password });
+    assert.equal(duplicateSignup.statusCode, 409, duplicateSignup.body);
+    assert.equal(duplicateSignup.json().error.code, "ACCOUNT_EXISTS");
+    assert.equal(calls.filter(call=>call === "signup").length, beforeDuplicate);
     const google = await post("/auth/google", { credential: googleCredential });
     assert.equal(google.statusCode, 200, google.body);
     assert.equal(google.json().state, "signed_in");
@@ -382,13 +388,10 @@ test("Identity Platform Google and password signup verify email, preserve legacy
     const operatorGoogle = await post("/auth/google", {
       credential: "operator-google",
     });
-    assert.equal(operatorGoogle.statusCode, 200);
-    const managedOperator = (
-      await query(
-        "SELECT user_id FROM identity_accounts WHERE subject='google-operator'",
-      )
-    )[0][0];
-    assert.notEqual(managedOperator, operator);
+    assert.equal(operatorGoogle.statusCode, 409);
+    assert.equal(operatorGoogle.json().error.code, "ACCOUNT_EXISTS");
+    assert.deepEqual(await query("SELECT user_id FROM identity_accounts WHERE subject='google-operator'"), []);
+    assert.deepEqual(await query("SELECT count(*) FROM users WHERE verified_email='operator@gmail.com'"), [["1"]]);
     const noRole = await app.inject({
       url: "/v1/admin/portal",
       headers: { cookie: cookie() },

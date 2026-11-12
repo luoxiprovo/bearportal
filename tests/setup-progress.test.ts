@@ -25,7 +25,7 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
     assert.equal(setupProgress(view).current, current);
     assert.equal(setupProgress(view).complete, complete);
     const html = renderCustomerPortal(view);
-    assert.equal((html.match(/aria-current="step"/g) ?? []).length, complete ? 0 : 1);
+    assert.equal((html.slice(html.indexOf('<ol class="milestones"')).split("</ol>")[0].match(/aria-current="step"/g) ?? []).length, complete ? 0 : 1);
     assert.ok(html.includes('aria-label="Setup progress"'));
   }
   assert.match(setupProgress({ ...connected, onboardingState: "waiting_resources" }).note, /No completion estimate/);
@@ -67,4 +67,31 @@ test("Brevo verification animates during work and automatic waits while preservi
   const paused = renderCustomerPortal({ ...connected, onboardingState: "attention", onboardingError: "DNS_ZONE_NOT_FOUND" });
   assert.doesNotMatch(paused, /class="milestone-number working-spinner"/);
   assert.match(paused, /Paused · needs attention/);
+});
+
+test("customer journey shows the saved next action and keeps active billing below setup", () => {
+  const billing = { status: "trialing", entitled: true, configured: true, trialAvailable: false, trialEndsAt: "2026-12-12T00:00:00Z", accessUntil: null, cleanupRequired: false };
+  const subscribed = renderCustomerPortal({ ...base, billing });
+  assert.match(subscribed, /id="next-step-title">Add your domain/);
+  assert.ok(subscribed.indexOf('action="/portal/domain"') < subscribed.indexOf('id="billing-details"'));
+  assert.doesNotMatch(subscribed, /<strong>Waiting for capacity<\/strong>/);
+  const provider = renderCustomerPortal({ ...base, billing, domainName: "company.com", detectedProvider: "namecom" });
+  assert.match(provider, /id="next-step-title">Connect your DNS provider/);
+  assert.match(provider, /action="\/portal\/dns-credential"/);
+  const unknownProvider = renderCustomerPortal({ ...base, billing, domainName: "company.com", detectedNameservers: ["ns.example.net"] });
+  assert.match(unknownProvider, /id="next-step-title">Check your DNS provider/);
+  assert.match(unknownProvider, /action="\/portal\/domain"/);
+  assert.doesNotMatch(unknownProvider, /action="\/portal\/dns-credential"/);
+  const running = renderCustomerPortal({ ...base, billing, domainName: "company.com", dnsState: "stored", onboardingState: "installing" });
+  assert.match(running, /Setup is in progress — no action needed/);
+  assert.doesNotMatch(running, /action="\/portal\/onboarding"/);
+  const reconnect = renderCustomerPortal({ ...base, billing, domainName: "company.com", dnsState: "stored", detectedProvider: "namecom", onboardingState: "attention", onboardingError: "DNS_CREDENTIAL_REQUIRED" });
+  assert.match(reconnect, /id="next-step-title">Reconnect your DNS provider/);
+  assert.match(reconnect, /action="\/portal\/dns-credential"/);
+  const ready = renderCustomerPortal({ ...base, billing, domainName: "company.com", dnsState: "stored", onboardingState: "installed", installerStatus: "succeeded" });
+  assert.match(ready, /id="next-step-title">Create your first mailbox/);
+  assert.match(ready, /Create a mailbox and set its password/);
+  const unpaid = renderCustomerPortal({ ...base, billing: { ...billing, entitled: false, status: "none", trialAvailable: true } });
+  assert.match(unpaid, /id="next-step-title">Start your subscription/);
+  assert.doesNotMatch(unpaid, /action="\/portal\/domain"/);
 });

@@ -370,6 +370,7 @@ describe("M5 oversight", { concurrency: false }, () => {
     const pair = await generateKeyPair("RS256", { extractable: true });
     privateKey = pair.privateKey;
     const deps: ApiDeps = {
+    billingRequired: false,
       onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir: mkdtempSync(join(tmpdir(), "bearportal-m5-secrets-")),

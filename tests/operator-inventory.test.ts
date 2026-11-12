@@ -72,6 +72,7 @@ test("operator inventory supports versioned browser CRUD, write-only credentials
   let failSsh = false;
   const app = await buildServer(
     {
+      billingRequired: false,
       databaseUrl,
       secretsDir,
       secretKeyHex,

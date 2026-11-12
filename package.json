@@ -18,7 +18,8 @@
     "trial:login": "tsx scripts/local-trial.ts login",
     "inventory": "tsx scripts/local-trial.ts inventory",
     "auth:configure": "tsx scripts/local-trial.ts auth-configure",
-    "reset:test-data": "tsx scripts/local-trial.ts reset"
+    "reset:test-data": "tsx scripts/local-trial.ts reset",
+    "stripe:listen": "tsx scripts/stripe-listen.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -33,6 +34,7 @@
     "ai": "7.0.159",
     "jose": "^6.1.0",
     "pg": "^8.16.3",
+    "stripe": "^23.1.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2",
     "zod": "^3.25.76"

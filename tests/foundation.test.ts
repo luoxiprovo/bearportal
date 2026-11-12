@@ -182,6 +182,7 @@ describe("M2 foundation A01-A04", { concurrency: false }, () => {
     privateKey = pair.privateKey;
     const secretsDir = mkdtempSync(join(tmpdir(), "bearportal-secrets-"));
     const deps: ApiDeps = {
+    billingRequired: false,
       databaseUrl,
       secretsDir,
       secretKeyHex,

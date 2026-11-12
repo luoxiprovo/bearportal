@@ -50,6 +50,7 @@ export async function completeIdentityAccount(
     await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
       "bearportal.identity." + claims.iss + "." + claims.sub,
     ]);
+    await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["bearportal.email." + email]);
     let user = (
       await db.query<{ id: string; status: string }>(
         `SELECT u.id,u.status FROM identity_accounts a JOIN users u ON u.id=a.user_id WHERE a.issuer=$1 AND a.subject=$2`,
@@ -84,6 +85,8 @@ export async function completeIdentityAccount(
         );
       user = legacy;
       if (!user) {
+        const duplicate = await db.query("SELECT id FROM users WHERE lower(verified_email)=$1", [email]);
+        if (duplicate.rows[0]) throw new HttpError(409, "ACCOUNT_EXISTS", "An account with this email already exists. Sign in with your existing method instead.");
         user = { id: randomUUID(), status: "active" };
         await db.query(
           "INSERT INTO users(id,identity_subject,verified_email,email_verified,status) VALUES($1,$2,$3,true,'active')",
@@ -122,8 +125,8 @@ export async function completeIdentityAccount(
         );
       org = { id: randomUUID() };
       await db.query(
-        "INSERT INTO organizations(id,owner_user_id,name,status) VALUES($1,$2,$3,'active')",
-        [org.id, user.id, email.split("@")[0].slice(0, 120)],
+        "INSERT INTO organizations(id,owner_user_id,name,status,billing_required) VALUES($1,$2,$3,'active',$4)",
+        [org.id, user.id, email.split("@")[0].slice(0, 120), ctx.billingRequired === true],
       );
       await db.query(
         "INSERT INTO allocation_requests(id,organization_id,profile_code,verified_registered_at,state) VALUES($1,$2,'e2-micro',now(),'waiting_for_server')",

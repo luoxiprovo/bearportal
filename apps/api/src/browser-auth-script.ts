@@ -3,7 +3,8 @@ export const BROWSER_AUTH_SCRIPT = String.raw`(async function(){
   const panel=document.querySelector('[data-managed-auth]');
   const logout=document.querySelector('[data-auth-logout]');
   if(!panel&&!logout)return;
-  const message=panel&&panel.querySelector('[data-auth-message]');
+  let message=panel&&panel.querySelector('[data-auth-message]');
+  if(!message&&logout){message=document.createElement('span');message.hidden=true;message.className='nav-auth-message';logout.parentElement.appendChild(message)}
   const form=panel&&panel.querySelector('[data-auth-form]');
   const verifyPanel=panel&&panel.querySelector('[data-auth-verification]');
   let options;
@@ -11,11 +12,11 @@ export const BROWSER_AUTH_SCRIPT = String.raw`(async function(){
   function busy(value){if(panel){panel.setAttribute('aria-busy',String(value));panel.querySelectorAll('button,input').forEach(element=>element.disabled=value)}if(logout)logout.disabled=value}
   async function post(path,body){const response=await fetch(path,{method:'POST',headers:{'content-type':'application/json','x-bearportal-auth-csrf':options.csrf},body:JSON.stringify(body),cache:'no-store'});const result=await response.json();if(!response.ok)throw Error(result.error&&result.error.message||'Sign-in could not be completed. Try again.');return result}
   function result(value){if(value.redirect){location.assign(value.redirect);return}if(value.state==='verify_email'){form.hidden=true;verifyPanel.hidden=false;panel.querySelector('[data-auth-google]').hidden=true;say(value.verificationDeliveryPending?'Your account was created. Verification delivery is delayed; use Resend verification email.':'Check your inbox'+(value.email?' at '+value.email:'')+'. Verify your email, then continue below.');if(form.elements.password)form.elements.password.value='';if(form.elements.confirmPassword)form.elements.confirmPassword.value=''}}
+  if(logout){logout.hidden=false;logout.addEventListener('click',async()=>{busy(true);const label=logout.textContent;logout.textContent='Signing out…';if(message)message.hidden=true;try{const response=await fetch('/auth/options',{cache:'no-store'});options=await response.json();if(!response.ok||!options.configured)throw Error('Sign out is unavailable. Please try again.');const value=await post('/auth/logout',{});location.assign(value.redirect)}catch(error){say(error.message||'Sign out failed. Please try again.',true);busy(false);logout.textContent=label}})}
+  if(!panel)return;
   try{
     const response=await fetch('/auth/options',{cache:'no-store'});options=await response.json();
     if(!response.ok||!options.configured)throw Error('Account sign-in is not configured yet. Contact the operator.');
-    if(logout){logout.hidden=false;logout.addEventListener('click',async()=>{busy(true);try{const value=await post('/auth/logout',{});location.assign(value.redirect)}catch(error){say(error.message,true);logout.disabled=false}})}
-    if(!panel)return;
     busy(false);
     form.addEventListener('submit',async event=>{event.preventDefault();const values=new FormData(form),signup=panel.dataset.authMode==='signup',password=String(values.get('password')),confirmPassword=String(values.get('confirmPassword'));if(signup&&password!==confirmPassword){say('Passwords do not match. Enter the same password in both fields.',true);form.elements.confirmPassword.focus();return}busy(true);try{result(await post(signup?'/auth/signup':'/auth/signin',{email:String(values.get('email')).trim(),password,...(signup?{confirmPassword}:{})}));}catch(error){say(error.message,true)}finally{busy(false)}});
     panel.querySelector('[data-auth-reset]').addEventListener('click',async()=>{const email=form.elements.email.value.trim();if(!email){say('Enter your email address first.',true);form.elements.email.focus();return}busy(true);try{const value=await post('/auth/password-reset',{email});say(value.message)}catch(error){say(error.message,true)}finally{busy(false)}});

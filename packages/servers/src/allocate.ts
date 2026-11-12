@@ -42,7 +42,8 @@ export async function allocateProfile(db: Queryable, profileCode: string, limit:
      WHERE r.state = 'waiting_for_server'
        AND r.profile_code = $1
        AND r.cancelled_at IS NULL
-       AND o.status = 'active'`,
+       AND o.status = 'active'
+       AND (NOT o.billing_required OR EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.organization_id=o.id AND b.status IN ('trialing','active') AND b.access_until>now() AND b.cancel_requested_at IS NULL AND b.invoice_issue_code IS NULL))`,
     [profileCode],
   );
   if ((waiting.rows[0]?.n ?? 0) > 0) await ensureShortage(db);
@@ -59,6 +60,7 @@ async function assignOldest(db: Queryable, profileCode: string): Promise<Assigne
        AND r.profile_code = $1
        AND r.cancelled_at IS NULL
        AND o.status = 'active'
+       AND (NOT o.billing_required OR EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.organization_id=o.id AND b.status IN ('trialing','active') AND b.access_until>now() AND b.cancel_requested_at IS NULL AND b.invoice_issue_code IS NULL))
        AND NOT EXISTS (
          SELECT 1 FROM server_assignments a
          WHERE a.organization_id = r.organization_id AND a.released_at IS NULL

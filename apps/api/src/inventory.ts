@@ -66,6 +66,8 @@ type Actor = {
 type Replay = { status: number; body: Record<string, unknown> } | null;
 
 export type InventoryContext = {
+  billingRequired?: boolean;
+  requireSubscription?: (db: Queryable, organizationId: string) => Promise<void>;
   withActor: <T>(request: FastifyRequest, mode: "customer" | "operator", fn: (db: Db, actor: Actor) => Promise<T>) => Promise<T>;
   withSystem: <T>(actor: "allocator" | "inventory_worker", fn: (db: Db) => Promise<T>) => Promise<T>;
   demandIdempotency: (request: FastifyRequest) => string;
@@ -1403,6 +1405,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
           [actor.organizationId, domain],
         );
         if (!domainRow.rows[0]) throw new HttpError(404, "NOT_FOUND", "Save the company domain first.");
+        if(automatic) await ctx.requireSubscription?.(db, actor.organizationId);
         if(automatic) await requireSetupConsent(db,actor.organizationId,domainRow.rows[0].id,formFlag(form,"deployConsent"));
       });
       const detected = await detectDomainProvider(ctx, domain);

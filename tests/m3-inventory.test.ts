@@ -329,6 +329,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
     publicKeyPem = await exportSPKI(pair.publicKey);
     secretsDir = mkdtempSync(join(tmpdir(), "bearportal-m3-secrets-"));
     const deps: ApiDeps = {
+    billingRequired: false,
       onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir,
@@ -1208,6 +1209,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
 
     const closedSecrets = mkdtempSync(join(tmpdir(), "bearportal-m3-closed-"));
     const closed = await buildServer({
+    billingRequired: false,
       onboardingIntervalMs: 0,
       databaseUrl,
       secretsDir: closedSecrets,

@@ -1,3 +1,5 @@
+import { registerBilling, requireSubscription, type BillingConfig } from "./billing.ts";
+import Stripe from "stripe";
 import { registerBrowserAuth } from "./browser-auth.ts";
 import { createIdentityPlatformClient, validatePlatformClaims, type IdentityPlatformClient } from "./identity-platform-client.ts";
 import type { IdentityPlatformConfig } from "./identity-platform-config.ts";
@@ -59,6 +61,10 @@ export type ApiDeps = {
   resolveInstallerCommit?: () => Promise<string>;
   onboardingIntervalMs?: number;
   installedTlsProbe?: InstalledTlsProbe;
+  billing?: BillingConfig;
+  stripe?: Stripe;
+  /** Explicit opt-out for isolated legacy integration tests only. Normal startup always enforces billing. */
+  billingRequired?: boolean;
   databaseUrl: string;
   secretsDir: string;
   secretKeyHex: string;
@@ -144,6 +150,11 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     const statusCode = (error as { statusCode?: number }).statusCode;
     if (statusCode === 400) {
       return sendError(reply, request, 400, "VALIDATION", "The request is not valid.");
+    }
+    if (error instanceof Stripe.errors.StripeError) {
+      request.log.error({stripeType:error.type,stripeCode:error.code??"unknown",stripeStatus:error.statusCode??null},"Stripe billing request failed");
+      const temporary=error.type === "StripeConnectionError" || error.type === "StripeAPIError" || error.type === "StripeRateLimitError";
+      return sendError(reply,request,503,temporary?"BILLING_UNAVAILABLE":"BILLING_CONFIG_ERROR",temporary?"Stripe is temporarily unavailable. Please try again shortly.":"Billing setup needs attention. Please contact the operator.",temporary);
     }
     const code = pgCode(error);
     if (code === "23505" || code === "23503") {
@@ -245,8 +256,8 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
       const organizationId = randomUUID();
       await applySettings(client, { actor: "customer", subject, email, userId, organizationId, bootstrap: "" });
       await client.query(
-        `INSERT INTO organizations (id, owner_user_id, name, status) VALUES ($1, $2, $3, 'active')`,
-        [organizationId, userId, organization],
+        `INSERT INTO organizations (id, owner_user_id, name, status, billing_required) VALUES ($1, $2, $3, 'active', $4)`,
+        [organizationId, userId, organization, deps.billingRequired !== false],
       );
       await client.query(
         `INSERT INTO allocation_requests (id, organization_id, profile_code, verified_registered_at, state)
@@ -463,8 +474,8 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
         bootstrap: "",
       });
       await db.query(
-        `INSERT INTO organizations (id, owner_user_id, name, status) VALUES ($1, $2, $3, 'active')`,
-        [organizationId, actor.userId, body.name],
+        `INSERT INTO organizations (id, owner_user_id, name, status, billing_required) VALUES ($1, $2, $3, 'active', $4)`,
+        [organizationId, actor.userId, body.name, deps.billingRequired !== false],
       );
       await db.query(
         `UPDATE invitations SET consumed_at = now(), consumed_by = $2 WHERE id = $1`,
@@ -832,7 +843,10 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     }
   }
 
+  const enforceSubscription = deps.billingRequired === false ? async () => {} : requireSubscription;
   const inventoryContext: InventoryContext = {
+    billingRequired: deps.billingRequired !== false,
+    requireSubscription: enforceSubscription,
     withActor,
     withSystem,
     demandIdempotency,
@@ -871,12 +885,15 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
       schedulerToken: deps.schedulerToken,
     }, db, input),
   };
+  const refreshBilling = registerBilling(app, inventoryContext, deps.billing, deps.stripe);
   registerInventoryRoutes(app, inventoryContext);
   registerOperatorInventory(app, inventoryContext);
   registerAdminCredentials(app, inventoryContext);
   registerBrowserAuth(app,inventoryContext,deps.identityPlatform,identityClient,deps.secretKeyHex);
 
   const installationContext: InstallationContext = {
+    billingRequired: deps.billingRequired !== false,
+    requireSubscription: enforceSubscription,
     withActor,
     withSystem,
     demandIdempotency,
@@ -911,6 +928,9 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
   });
 
   registerLifecycleRoutes(app, {
+    refreshBilling,
+    billingRequired: deps.billingRequired !== false,
+    billingConfigured: Boolean(deps.billing),
     browserAuthEnabled:Boolean(deps.identityPlatform),
     withActor,
     withSystem,

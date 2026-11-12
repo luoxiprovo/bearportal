@@ -56,6 +56,8 @@ type Replay = { status: number; body: Record<string, unknown> } | null;
 type ReleasePin = { id: string; artifactDir: string };
 
 export type InstallationContext = {
+  billingRequired?: boolean;
+  requireSubscription?: (db: Queryable, organizationId: string) => Promise<void>;
   withActor: <T>(request: FastifyRequest, mode: "customer" | "operator", fn: (db: Db, actor: Actor) => Promise<T>) => Promise<T>;
   withSystem: <T>(actor: "allocator" | "inventory_worker", fn: (db: Db) => Promise<T>) => Promise<T>;
   demandIdempotency: (request: FastifyRequest) => string;
@@ -1455,6 +1457,7 @@ function schedulerAuthorized(header: string | undefined, expected: string | unde
 export async function createDeploymentForActor(ctx: InstallationContext, db: Db, actor: Actor, request: FastifyRequest, body: { domainId: string; firstMailboxLocalPart: string; testMailConsent: true }, idempotencyKey: string): Promise<{ status: number; body: Record<string, unknown> }> {
   ctx.requireVerified(actor);
   if (!actor.organizationId) throw new HttpError(422, "ORGANIZATION_REQUIRED", "Create an organization first.");
+  await ctx.requireSubscription?.(db, actor.organizationId);
   const route = "POST /v1/deployments";
   const replayed = await ctx.replay(db, actor.userId, route, idempotencyKey, body);
   if (replayed) return replayed;
@@ -1588,6 +1591,7 @@ export async function createDeploymentForActor(ctx: InstallationContext, db: Db,
 export async function provisionDeploymentForActor(ctx: InstallationContext, db: Db, actor: Actor, request: FastifyRequest, id: string, body: { expectedVersion: number }, idempotencyKey: string): Promise<{ status: number; body: Record<string, unknown> }> {
   ctx.requireVerified(actor);
   if (!actor.organizationId) throw new HttpError(422, "ORGANIZATION_REQUIRED", "Create an organization first.");
+  await ctx.requireSubscription?.(db, actor.organizationId);
   const route = "POST /v1/deployments/:id/provision";
   const replayed = await ctx.replay(db, actor.userId, route, idempotencyKey, { id, ...body });
   if (replayed) return replayed;

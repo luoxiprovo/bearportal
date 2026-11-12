@@ -13,6 +13,7 @@ const devJwtPrivateKeyPem = config.allowDevIdentity && config.devJwtPrivateKeyFi
   ? readFileSync(config.devJwtPrivateKeyFile, "utf8")
   : undefined;
 const app = await buildServer({
+  billing: config.billing,
   identityPlatform:config.identityPlatform,
   databaseUrl: config.databaseUrl,
   secretsDir: config.secretsDir,

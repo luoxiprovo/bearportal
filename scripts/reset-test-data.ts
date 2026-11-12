@@ -12,9 +12,10 @@ CREATE TEMP TABLE reset_operator_snapshot ON COMMIT DROP AS
  SELECT u.id,u.identity_subject,u.verified_email,r.role FROM users u JOIN operator_roles r ON r.user_id=u.id;
 DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM operator_roles r JOIN users u ON u.id=r.user_id WHERE r.revoked_at IS NULL AND u.status='active') THEN RAISE EXCEPTION 'No operator account to preserve'; END IF;
+ IF EXISTS(SELECT 1 FROM billing_subscriptions WHERE subscription_id IS NOT NULL AND status <> 'canceled') THEN RAISE EXCEPTION 'Cancel Stripe subscriptions before resetting local billing records'; END IF;
  IF EXISTS(SELECT 1 FROM onboarding_requests WHERE state='installing') THEN RAISE EXCEPTION 'An installation is still running'; END IF;
 END $$;
-TRUNCATE TABLE cancellation_schedules,restore_requests,upgrade_plans,cleanup_reports,
+TRUNCATE TABLE billing_events,billing_subscriptions,cancellation_schedules,restore_requests,upgrade_plans,cleanup_reports,
  audit_events,idempotency_keys,outbox_events,backups,jobs,dns_connections,deployments,
  secret_refs,domains,server_assignments,allocation_requests,invitations,organizations,
  relay_connections,servers,diagnoses,provider_attempts,required_actions,inventory_jobs,

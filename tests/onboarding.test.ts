@@ -80,6 +80,7 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
   let sshReady = false;
   let changeDuringProbe = false;
   const deps: ApiDeps = {
+    billingRequired: false,
     databaseUrl,
     secretsDir: mkdtempSync(join(tmpdir(), "bearportal-onboarding-")),
     secretKeyHex: "ab".repeat(32),

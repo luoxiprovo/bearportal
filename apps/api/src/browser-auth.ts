@@ -173,6 +173,11 @@ export function registerBrowserAuth(
       .parse(request.body);
     if (body.password !== body.confirmPassword)
       throw new HttpError(400, "PASSWORD_MISMATCH", "Passwords do not match. Enter the same password in both fields.");
+    const duplicate = await ctx.withSystem("inventory_worker", async db => {
+      await ctx.setActor(db, "platform_administrator");
+      return (await db.query("SELECT id FROM users WHERE lower(verified_email)=$1 LIMIT 1", [body.email.toLowerCase()])).rows.length > 0;
+    });
+    if (duplicate) throw new HttpError(409, "ACCOUNT_EXISTS", "An account with this email already exists. Sign in instead or use password reset.");
     let tokens: IdentityTokens;
     try {
       tokens = await client.password(body.email.toLowerCase(), body.password, true);

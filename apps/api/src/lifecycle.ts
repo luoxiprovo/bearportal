@@ -1,3 +1,4 @@
+import { billingView } from "./billing.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
@@ -65,6 +66,9 @@ type DeploymentRow = {
 };
 
 export type LifecycleContext = {
+  refreshBilling?: (organizationId: string) => Promise<void>;
+  billingRequired?: boolean;
+  billingConfigured?: boolean;
   browserAuthEnabled?:boolean;
   withActor: <T>(request: FastifyRequest, mode: "customer" | "operator", fn: (db: Db, actor: Actor) => Promise<T>) => Promise<T>;
   withSystem: <T>(actor: "allocator" | "inventory_worker", fn: (db: Db) => Promise<T>) => Promise<T>;
@@ -292,11 +296,20 @@ export function registerLifecycleRoutes(app: FastifyInstance, ctx: LifecycleCont
     return reply.code(created.status).send({ ...created.body, requestId: request.id });
   });
 
+  async function setupView(db: Db, organizationId: string): Promise<CustomerPortalView> {
+    let view=await customerView(db,organizationId,ctx.billingRequired===true,ctx.billingConfigured===true);
+    if(view.billing?.status === "invalid_plan" && ctx.refreshBilling){
+      await ctx.refreshBilling(organizationId);
+      view=await customerView(db,organizationId,ctx.billingRequired===true,ctx.billingConfigured===true);
+    }
+    return view;
+  }
+
   app.get("/v1/portal/overview", async (request) => {
     return ctx.withActor(request, "customer", async (db, actor) => {
       ctx.requireVerified(actor);
       if (!actor.organizationId) throw new HttpError(422, "ORGANIZATION_REQUIRED", "Create an organization first.");
-      return { ...(await customerView(db, actor.organizationId)), requestId: request.id };
+      return { ...(await setupView(db, actor.organizationId)), requestId: request.id };
     });
   });
 
@@ -305,7 +318,7 @@ export function registerLifecycleRoutes(app: FastifyInstance, ctx: LifecycleCont
     try { view = await ctx.withActor(request, "customer", async (db, actor) => {
       ctx.requireVerified(actor);
       if (!actor.organizationId) throw new HttpError(422, "ORGANIZATION_REQUIRED", "Create an organization first.");
-      return customerView(db, actor.organizationId);
+      return setupView(db, actor.organizationId);
     }); } catch(error){if(ctx.browserAuthEnabled&&error instanceof HttpError&&error.status===401)return reply.code(303).header('location','/login?resume=1').send('');throw error;}
     const detected = await detectedDns(ctx, view.domainName);
     reply.type("text/html; charset=utf-8");
@@ -1075,7 +1088,7 @@ async function detectedDns(
   return { detectedProvider: detectDnsProvider(detectedNameservers), detectedNameservers };
 }
 
-async function customerView(db: Db, organizationId: string): Promise<CustomerPortalView> {
+async function customerView(db: Db, organizationId: string, billingRequired = false, billingConfigured = false): Promise<CustomerPortalView> {
   const deployment = await db.query<{
     id: string;
     admin_credentials_available:boolean;
@@ -1264,6 +1277,7 @@ async function customerView(db: Db, organizationId: string): Promise<CustomerPor
   const jobRows: ActivityLine[] = jobs.rows.map((item) => ({ kind: item.kind, state: item.state, at: isoTime(item.updated_at) }));
   const eventRows: ActivityLine[] = events.rows.map((item) => ({ kind: item.action, state: "recorded", at: isoTime(item.occurred_at) }));
   return {
+    billing: billingRequired ? await billingView(db, organizationId, billingConfigured) : undefined,
     adminCredentialsAvailable:row?.admin_credentials_available===true,
     onboardingState: onboarding?.state ?? null,
     missingResource: onboarding?.missing_resource ?? null,
@@ -1451,7 +1465,14 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
     row.server_id,
     `${Number(row.amount_minor)} ${row.currency} ${row.source} ${row.billing_system}`,
   ]));
+  const billingCleanup = await db.query<{ organization_id: string; email: string; server_id: string | null; public_ipv4: string | null; relay_id: string | null }>(
+    `SELECT b.organization_id,u.verified_email AS email,a.server_id,host(s.public_ipv4) AS public_ipv4,r.relay_connection_id AS relay_id
+     FROM billing_subscriptions b JOIN organizations o ON o.id=b.organization_id JOIN users u ON u.id=o.owner_user_id
+     LEFT JOIN server_assignments a ON a.organization_id=o.id AND a.released_at IS NULL LEFT JOIN servers s ON s.id=a.server_id
+     LEFT JOIN relay_assignments r ON r.organization_id=o.id AND r.released_at IS NULL WHERE b.cleanup_required
+     AND EXISTS(SELECT 1 FROM required_actions x WHERE x.organization_id=o.id AND x.code='billing.manual_release' AND x.state='open') ORDER BY b.updated_at`);
   return {
+    billingCleanup: billingCleanup.rows.map(row=>({organizationId:row.organization_id,email:row.email,serverId:row.server_id,publicIpv4:row.public_ipv4,relayId:roles.includes("support") ? null : row.relay_id})),
     canManageServers:roles.includes("platform_administrator")||roles.includes("infrastructure_operator"),
     canManageBrevo:roles.includes("platform_administrator"),
     canViewBrevo:roles.includes("platform_administrator")||roles.includes("infrastructure_operator"),

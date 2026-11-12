@@ -86,6 +86,7 @@ export function registerOnboarding(
       inventory.requireVerified(actor);
       if (!actor.organizationId)
         throw new HttpError(422, "ORGANIZATION_REQUIRED", "Register first.");
+      await inventory.requireSubscription?.(db, actor.organizationId);
       inventory.consumeLimit(actor.userId, "onboarding", 10, 60 * 60 * 1000);
       const domain = await db.query<{ id: string }>(
         `SELECT d.id FROM domains d JOIN dns_connections c ON c.domain_id=d.id AND c.organization_id=d.organization_id
@@ -166,6 +167,7 @@ export function registerOnboarding(
          JOIN domains d ON d.id=r.domain_id AND d.organization_id=r.organization_id
          WHERE r.state IN ('queued','waiting_resources') AND r.next_attempt_at <= now()
            AND o.status='active' AND u.status='active' AND d.state <> 'retired'
+           ${inventory.billingRequired ? `AND EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.organization_id=r.organization_id AND b.status IN ('trialing','active') AND b.access_until>now() AND b.cancel_requested_at IS NULL AND b.invoice_issue_code IS NULL)` : ''}
          ORDER BY r.created_at FOR UPDATE OF r SKIP LOCKED LIMIT 1`,
         );
         const item = rows.rows[0];

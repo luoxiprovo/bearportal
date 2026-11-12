@@ -32,6 +32,12 @@ Customer setup forms renew managed sign-in before submission. If renewal fails, 
 
 The customer can close the browser during setup. Known retryable failures continue automatically; interrupted host operations with unknown outcomes require operator review. Backend installation issues do not ask the customer to authorize each step again or resubmit a working credential.
 
+## Subscriptions
+
+Customers subscribe through Stripe Checkout before installing Bearmail: the first calendar month is free, then **$20 USD per month plus applicable tax**. A payment method is required. Cancel during the free month to avoid the first charge. Cancellation stops future billing and creates an operator task to manually release server and Brevo resources. Payment failures block new installation. Stripe credentials are required to enable Checkout; the installation gate remains closed until a subscription is confirmed.
+
+Start in Stripe test mode using the [billing setup guide](docs/runbooks/billing.md) and the [bearos.si integration plan](docs/runbooks/stripe-integration-plan.md). Run `pnpm trial:migrate` before starting updated code.
+
 ## Operator inventory
 
 At `/operator`, operators can search and review servers, Brevo accounts and registered users with their live resource assignments. Infrastructure operators manage servers; platform administrators also manage Brevo accounts. Support access is read-only and excludes Brevo inventory. User records are read-only in this workspace.
@@ -59,7 +65,7 @@ pnpm trial:bootstrap
 pnpm trial:start
 ```
 
-Apply all migrations, including `007_inventory_management.sql` and `008_identity_accounts.sql`. Normal startup uses live SSH, Brevo and installer integrations. Development mode does not simulate those operations. Do not run `trial:reset` on retained data. For a deliberate fresh test with new inventory, see [Reset local test data](docs/runbooks/test-reset.md). The reset preserves operator access and backs up the database and encrypted credentials.
+Apply all pending migrations, including `012_stripe_business_billing.sql`. Normal startup uses live SSH, Brevo and installer integrations. Development mode does not simulate those operations. Do not run `trial:reset` on retained data. For a deliberate fresh test with new inventory, see [Reset local test data](docs/runbooks/test-reset.md). The reset preserves operator access and backs up the database and encrypted credentials.
 
 Configure Identity Platform after enabling its Google and Email/Password providers:
 

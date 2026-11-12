@@ -1,3 +1,4 @@
+import { readBillingConfig, type BillingConfig } from "./billing.ts";
 import { readIdentityPlatformConfig, type IdentityPlatformConfig } from "./identity-platform-config.ts";
 const REQUIRED = [
   "DATABASE_URL",
@@ -9,6 +10,7 @@ const REQUIRED = [
 ] as const;
 
 export type ApiConfig = {
+  billing?: BillingConfig;
   identityPlatform?: IdentityPlatformConfig;
   skipSshHostKeyVerification: boolean;
   databaseUrl: string;
@@ -51,6 +53,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
     throw new Error("PORT is invalid.");
   }
   return {
+    billing: readBillingConfig(env),
     identityPlatform:readIdentityPlatformConfig(env),
     skipSshHostKeyVerification: env.BEARPORTAL_TEST_SKIP_SSH_HOST_KEY_CHECK === "1",
     databaseUrl: env.DATABASE_URL ?? "",
