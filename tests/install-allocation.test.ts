@@ -135,3 +135,86 @@ test("inventory is allocated by install-request time; unstarted legacy and pause
     await db.end();
   }
 });
+
+test("installation consent backfill works under FORCE RLS without granting ordinary registrations a reservation", async () => {
+  await migrate(migrationUrl);
+  await query(
+    "TRUNCATE users,organizations,servers,relay_connections,domains,secret_refs,deployments,jobs,operator_roles,allocation_requests,invitations,idempotency_keys,audit_events,outbox_events CASCADE",
+  );
+  const rows = [
+    "saved-consent",
+    "manual-deployment",
+    "registration-only",
+    "already-requested",
+  ].map((name) => ({
+    name,
+    user: randomUUID(),
+    org: randomUUID(),
+    domain: randomUUID(),
+  }));
+  for (const row of rows) {
+    await query(`INSERT INTO users(id,identity_subject,verified_email,email_verified,status) VALUES(${q(row.user)},${q(row.name)},${q(row.name + "@example.org")},true,'active');
+  INSERT INTO organizations(id,owner_user_id,name,status) VALUES(${q(row.org)},${q(row.user)},${q(row.name)},'active');
+  INSERT INTO allocation_requests(id,organization_id,profile_code,verified_registered_at,state,install_requested_at) VALUES(${q(randomUUID())},${q(row.org)},'e2-micro',now()-interval '1 day','waiting_for_server',${row.name === "already-requested" ? "'2026-01-02T00:00:00Z'::timestamptz" : "NULL"});
+  INSERT INTO domains(id,organization_id,normalized_name,existing_mail,state) VALUES(${q(row.domain)},${q(row.org)},${q(row.name + ".site")},false,'pending');`);
+  }
+  await query(`INSERT INTO onboarding_requests(organization_id,domain_id,state,consented_at) VALUES(${q(rows[0]!.org)},${q(rows[0]!.domain)},'queued','2026-01-01T00:00:00Z'),(${q(rows[3]!.org)},${q(rows[3]!.domain)},'queued','2026-01-01T00:00:00Z');
+ INSERT INTO deployments(id,organization_id,domain_id,desired_state,onboarding_stage,lifecycle_state,health_state,test_mail_consent,created_at) VALUES(${q(randomUUID())},${q(rows[1]!.org)},${q(rows[1]!.domain)},'draft','draft','onboarding','unknown',true,'2026-01-01T00:00:00Z');`);
+  const db = new pg.Client({ connectionString: migrationUrl });
+  await db.connect();
+  try {
+    const original =
+      (
+        await db.query(
+          "SELECT current_setting('bearportal.actor',true) AS actor",
+        )
+      ).rows[0].actor ?? "";
+    await db.query("BEGIN");
+    await db.query(
+      "SELECT set_config('bearportal.actor','customer',true),set_config('bearportal.organization_id','',true),set_config('bearportal.user_id','',true)",
+    );
+    assert.equal(
+      (await db.query("SELECT count(*) FROM allocation_requests")).rows[0]
+        .count,
+      "0",
+      "Migration owner is subject to FORCE RLS",
+    );
+    const { readFileSync } = await import("node:fs");
+    await db.query(
+      readFileSync(
+        new URL(
+          "../packages/db/migrations/015_backfill_install_requests.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    await db.query("COMMIT");
+    assert.equal(
+      (
+        await db.query(
+          "SELECT current_setting('bearportal.actor',true) AS actor",
+        )
+      ).rows[0].actor ?? "",
+      original,
+      "Privilege elevation is transaction-local",
+    );
+    for (const row of rows) {
+      const value = (
+        await query(
+          `SELECT coalesce(to_char(install_requested_at AT TIME ZONE 'UTC','YYYY-MM-DD'),'not-requested') FROM allocation_requests WHERE organization_id=${q(row.org)}`,
+        )
+      )[0]![0];
+      assert.equal(
+        value,
+        row.name === "registration-only"
+          ? "not-requested"
+          : row.name === "already-requested"
+            ? "2026-01-02"
+            : "2026-01-01",
+      );
+    }
+  } finally {
+    await db.end();
+  }
+});
