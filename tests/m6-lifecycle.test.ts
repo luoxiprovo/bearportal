@@ -1426,7 +1426,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     assert.equal(String(checklist.body.notes.join(" ")).includes("generate("), false);
   });
 
-  it("stores a Brevo account without a domain and checks the domain from the portal", async () => {
+  it("stores Brevo inventory without reserving it until installation is requested", async () => {
     const apiKey = "api-key-m6-canary";
     const smtpKey = "smtp-key-m6-pending";
     const rejectedKey = "reject-api-key-m6-canary";
@@ -1474,8 +1474,8 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     const waiting = await postForm("/portal/domain", early.token, { csrf: "1", domain: earlyDomain, existingMail: "1" });
     assert.equal(waiting.status, 200);
     assertHonestPage(waiting.text);
-    assert.ok(waiting.text.includes("Resources are tight right now."));
-    assert.ok(waiting.text.includes("save your setup"));
+    assert.ok(waiting.text.includes("Your domain is saved"));
+    assert.equal(waiting.text.includes("Resources are tight right now."),false);
     assert.equal(waiting.text.includes("Brevo reports verified"), false);
     assert.equal(brevoCalls, 0);
     assert.equal(await scalar(`SELECT state || ':' || existing_mail::text FROM domains WHERE normalized_name = ${sqlText(earlyDomain)}`), "pending:true");
@@ -1498,6 +1498,12 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     assert.equal(await scalar("SELECT count(*) FROM relay_connections"), "1");
     assert.equal(await scalar("SELECT state FROM relay_connections"), "inactive");
 
+    const beforeStart=await postForm("/portal/domain",early.token,{csrf:"1",domain:earlyDomain,existingMail:"1"});
+    assert.equal(beforeStart.status,200);
+    assert.equal(brevoCalls,0);
+    assert.equal(await scalar("SELECT count(*) FROM relay_assignments WHERE released_at IS NULL"),"0");
+    const deploymentId = await createDeployment(early.token, domainId);
+    assert.equal(await scalar(`SELECT version::text FROM deployments WHERE id = ${sqlText(deploymentId)}`), "1");
     const checked = await postForm("/portal/domain", early.token, { csrf: "1", domain: earlyDomain, existingMail: "1" });
     assert.equal(checked.status, 200);
 
@@ -1526,10 +1532,8 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     assert.equal(beforeDeployment.body.domainState, "pending");
     assert.equal(beforeDeployment.body.brevoAuthenticated, false);
     assert.equal(beforeDeployment.body.mailVerified, false);
-    assert.equal(beforeDeployment.body.deploymentId, null);
+    assert.equal(beforeDeployment.body.deploymentId, deploymentId);
 
-    const deploymentId = await createDeployment(early.token, domainId);
-    assert.equal(await scalar(`SELECT version::text FROM deployments WHERE id = ${sqlText(deploymentId)}`), "1");
     assert.equal(await scalar(`SELECT mail_verified::text FROM deployments WHERE id = ${sqlText(deploymentId)}`), "false");
     const copied = await scalar(`SELECT brevo_records::text FROM deployments WHERE id = ${sqlText(deploymentId)}`);
     assert.ok(copied.includes("brevo_code"));
@@ -1607,7 +1611,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     assert.equal(brevoCalls, callsBefore);
     const noAccount = await postForm("/portal/domain", other.token, { csrf: "1", domain: "json-m6.gamma-bearportal.com", existingMail: "" });
     assert.equal(noAccount.status, 200);
-    assert.ok(noAccount.text.includes("Resources are tight right now."));
+    assert.equal(noAccount.text.includes("Resources are tight right now."),false);
     assert.equal(brevoCalls, callsBefore);
     assert.equal(await scalar(`SELECT count(*) FROM relay_assignments WHERE organization_id = ${sqlText(other.organizationId)} AND released_at IS NULL`), "0");
 

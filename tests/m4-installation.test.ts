@@ -342,7 +342,7 @@ async function invite(email: string): Promise<string> {
   return response.body.invitationToken as string;
 }
 
-async function registerCustomer(local: string, name: string): Promise<{ token: string; organizationId: string; body: Record<string, any> }> {
+async function registerCustomerStartingInstallation(local: string, name: string): Promise<{ token: string; organizationId: string; body: Record<string, any> }> {
   const email = `${local}@recovery-bearportal.com`;
   const invitation = await invite(email);
   const token = await tokenFor(local, email);
@@ -352,6 +352,13 @@ async function registerCustomer(local: string, name: string): Promise<{ token: s
     body: JSON.stringify({ name, invitationToken: invitation }),
   });
   expectStatus(created, 201);
+  assert.equal(created.body.allocationState,"waiting_for_server","Registration alone must not reserve inventory");
+  // These inventory/installer fixtures start after the user's install authorization.
+  await superQuery(`UPDATE allocation_requests SET install_requested_at=now() WHERE organization_id=${sqlText(created.body.id as string)}`);
+  expectStatus(await api(base,"/internal/allocate",{method:"POST",headers:{"content-type":"application/json","x-bearportal-scheduler":schedulerToken},body:"{}"}),200);
+  const requested=await api(base,"/v1/organization/server",{headers:auth(token)});
+  expectStatus(requested,200);
+  created.body={...created.body,...requested.body,id:created.body.id};
   return { token, organizationId: created.body.id as string, body: created.body };
 }
 
@@ -492,7 +499,7 @@ async function createDeployment(token: string, domainId: string, localPart = "ow
 
 async function readyCustomer(local = "m4-owner"): Promise<Ready> {
   const host = await makeAvailable(`${local}-host`);
-  const customer = await registerCustomer(local, "M4 Owner");
+  const customer = await registerCustomerStartingInstallation(local, "M4 Owner");
   assert.equal(customer.body.server.id, host.serverId);
   const domainId = await verifyDomain(customer.token, DOMAIN);
   await addRelay();
@@ -723,7 +730,7 @@ describe("M4 installation", { concurrency: false }, () => {
   });
 
   it("does not authorize MX or call the installer for a draft", async () => {
-    const customer = await registerCustomer("m4-draft", "Draft");
+    const customer = await registerCustomerStartingInstallation("m4-draft", "Draft");
     const domainId = await addDomain(customer.token, DOMAIN);
     const invalid = await api(base, "/v1/deployments", {
       method: "POST",
@@ -746,7 +753,7 @@ describe("M4 installation", { concurrency: false }, () => {
   });
 
   it("waits for an enrolled server without allocating a machine", async () => {
-    const customer = await registerCustomer("m4-wait", "Waiting");
+    const customer = await registerCustomerStartingInstallation("m4-wait", "Waiting");
     assert.equal(customer.body.allocationState, "waiting_for_server");
     assert.equal(customer.body.server, null);
     const domainId = await verifyDomain(customer.token, DOMAIN);
@@ -769,7 +776,7 @@ describe("M4 installation", { concurrency: false }, () => {
 
   it("fails closed when the release is unpinned", async () => {
     const host = await makeAvailable("unpinned-host");
-    const customer = await registerCustomer("m4-unpinned", "Unpinned");
+    const customer = await registerCustomerStartingInstallation("m4-unpinned", "Unpinned");
     assert.equal(customer.body.server.id, host.serverId);
     const domainId = await verifyDomain(customer.token, DOMAIN);
     const deployment = await createDeployment(customer.token, domainId);
@@ -1045,7 +1052,7 @@ describe("M4 installation", { concurrency: false }, () => {
   });
 
   it("caps beta mailboxes at four and keeps login disabled", async () => {
-    const customer = await registerCustomer("m4-boxes", "Boxes");
+    const customer = await registerCustomerStartingInstallation("m4-boxes", "Boxes");
     const domainId = await verifyDomain(customer.token, DOMAIN);
     const deployment = await createDeployment(customer.token, domainId);
     const over = await api(base, `/v1/deployments/${deployment.id}/mailboxes`, {
@@ -1116,7 +1123,7 @@ describe("M4 installation", { concurrency: false }, () => {
 
   it("stores a mailbox password only in a sealed file and expires it", async () => {
     const host = await makeAvailable("credential-host");
-    const customer = await registerCustomer("m4-secret", "Secret");
+    const customer = await registerCustomerStartingInstallation("m4-secret", "Secret");
     assert.equal(customer.body.server.id, host.serverId);
     const domainId = await verifyDomain(customer.token, DOMAIN);
     const deployment = await createDeployment(customer.token, domainId);
@@ -1297,7 +1304,7 @@ describe("M4 installation", { concurrency: false }, () => {
     const ready = await readyCustomer("m4-owner-iso");
     const accepted = await provision(ready.token, ready.deploymentId, 1);
     expectStatus(accepted, 202);
-    const other = await registerCustomer("m4-other", "Other");
+    const other = await registerCustomerStartingInstallation("m4-other", "Other");
     const paths = [
       `/v1/deployments/${ready.deploymentId}`,
       `/v1/deployments/${ready.deploymentId}/dns-plans`,
@@ -1337,7 +1344,7 @@ describe("M4 installation", { concurrency: false }, () => {
   });
 
   it("rejects a credential when no server is assigned", async () => {
-    const customer = await registerCustomer("m4-noserver", "No Server");
+    const customer = await registerCustomerStartingInstallation("m4-noserver", "No Server");
     const domainId = await verifyDomain(customer.token, DOMAIN);
     const deployment = await createDeployment(customer.token, domainId);
     const rejected = await api(base, `/v1/mailboxes/${deployment.mailboxId}/credential`, {

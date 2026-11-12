@@ -1,3 +1,4 @@
+import {requestInstallationAllocation} from "./installation-request.ts";
 import { HttpError } from "./errors.ts";
 import type { Queryable } from "../../../packages/servers/src/allocate.ts";
 
@@ -44,6 +45,7 @@ export async function enqueueOnboarding(
       "REVIEW_REQUIRED",
       "Our team needs to review the interrupted setup before restarting it.",
     );
+  await requestInstallationAllocation(db,organizationId,domainId);
   await db.query(
     `INSERT INTO onboarding_requests (organization_id, domain_id)
     VALUES ($1, $2)

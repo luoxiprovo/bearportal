@@ -1,3 +1,4 @@
+import {installationRequested} from "./installation-request.ts";
 import { createHash, createPublicKey, randomBytes, randomUUID, timingSafeEqual, verify } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { DomainError, normalizeDomain, recoveryIsOutsideDomain } from "../../../packages/domain/src/domain.ts";
@@ -835,10 +836,11 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
   app.get("/v1/admin/server-waitlist", async (request) => {
     return ctx.withActor(request, "operator", async (db) => {
       const rows = await db.query(
-        `SELECT r.id, r.organization_id, r.profile_code, r.verified_registered_at, r.state
+        `SELECT r.id, r.organization_id, r.profile_code, r.verified_registered_at, r.install_requested_at, r.state
          FROM allocation_requests r
-         WHERE r.state = 'waiting_for_server'
-         ORDER BY r.verified_registered_at, r.id
+         WHERE r.state = 'waiting_for_server' AND r.install_requested_at IS NOT NULL AND r.cancelled_at IS NULL
+           AND NOT EXISTS(SELECT 1 FROM onboarding_requests setup WHERE setup.organization_id=r.organization_id AND setup.state='attention')
+         ORDER BY r.install_requested_at, r.id
          LIMIT 100`,
       );
       return { waitlist: rows.rows, requestId: request.id };
@@ -1031,6 +1033,7 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
       if (replayed) return replayed;
       const org = await db.query("SELECT id FROM organizations WHERE id = $1 AND status = 'active'", [id]);
       if (!org.rows[0]) throw new HttpError(404, "NOT_FOUND", "The organization was not found.");
+      if(!await installationRequested(db,id))throw new HttpError(409,"INSTALLATION_NOT_REQUESTED","The customer must start Bearmail installation before a Brevo account can be assigned.");
       const relay = await db.query(
         `UPDATE relay_connections
          SET state = 'assigned', version = version + 1, updated_at = now()
@@ -1304,10 +1307,12 @@ export function registerInventoryRoutes(app: FastifyInstance, ctx: InventoryCont
           throw new HttpError(422, "RECOVERY_EMAIL_INSIDE_DOMAIN", "The recovery email must be outside the domain being hosted.");
         }
         const domainId = await saveCustomerDomain(ctx, db, request, actor, domain, existingMail, formFlag(form, "onboarding"));
-        const claimed = await claimBrevoAccount(ctx, db, actor.organizationId);
-        return { domainId, organizationId: actor.organizationId, claimed };
+        const requested=await installationRequested(db,actor.organizationId);
+        const claimed = requested?await claimBrevoAccount(ctx, db, actor.organizationId):null;
+        return { domainId, organizationId: actor.organizationId, claimed,requested };
       });
       const detected = await detectDomainProvider(ctx, domain);
+      if(!saved.requested)return send(200,{domain,saved:true,...detected});
       if (formFlag(form, "onboarding")) {
         return send(200, { domain, saved: true, unavailable: !saved.claimed, ...detected });
       }
@@ -1631,8 +1636,8 @@ function isPublishRecord(value: BrevoPublishRecord): boolean {
 }
 
 async function organizationServer(db: Db, organizationId: string): Promise<Record<string, unknown>> {
-  const allocation = await db.query<{ state: string }>(
-    `SELECT state FROM allocation_requests WHERE organization_id = $1 AND state <> 'cancelled' ORDER BY created_at DESC LIMIT 1`,
+  const allocation = await db.query<{ state: string; install_requested_at: Date|null }>(
+    `SELECT state,install_requested_at FROM allocation_requests WHERE organization_id = $1 AND state <> 'cancelled' ORDER BY created_at DESC LIMIT 1`,
     [organizationId],
   );
   const org = await db.query<{ version: number }>("SELECT version FROM organizations WHERE id = $1", [organizationId]);
@@ -1640,7 +1645,7 @@ async function organizationServer(db: Db, organizationId: string): Promise<Recor
   const server = allocationState === "allocated" ? await readCustomerServer(db, organizationId) : null;
   return {
     allocationState,
-    waitReason: allocationState === "waiting_for_server" ? "inventory.shortage" : null,
+    waitReason: allocationState === "waiting_for_server" && allocation.rows[0]?.install_requested_at ? "inventory.shortage" : null,
     server,
     organizationVersion: org.rows[0]?.version ?? null,
   };
@@ -1989,6 +1994,7 @@ export async function claimBrevoAccount(
   organizationId: string,
 ): Promise<{ relayId: string; fileName: string } | null> {
   await ctx.setActor(db, "platform_administrator");
+  if(!await installationRequested(db,organizationId))return null;
   const existing = await db.query<{ id: string; file_name: string }>(
     `SELECT r.id, s.file_name
      FROM relay_assignments a

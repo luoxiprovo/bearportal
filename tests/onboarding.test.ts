@@ -212,6 +212,8 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     });
     assert.equal(registered.statusCode, 303);
     const cookie = String(registered.headers["set-cookie"]).split(";")[0];
+    assert.deepEqual(await query("SELECT count(*) FROM server_assignments WHERE released_at IS NULL"),[["0"]],"Registration must not reserve a server");
+    assert.deepEqual(await query("SELECT count(*) FROM relay_assignments WHERE released_at IS NULL"),[["0"]],"Registration must not reserve Brevo");
     const welcome = await app.inject({ url: "/portal", headers: { cookie } });
     assert.ok(welcome.body.includes("What’s your domain?"));
     const saved = await form(
@@ -228,6 +230,9 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       0,
       "domain discovery must not run external mail setup before consent",
     );
+    assert.deepEqual(await query("SELECT count(*) FROM server_assignments WHERE released_at IS NULL"),[["0"]],"Domain discovery must not reserve a server");
+    assert.deepEqual(await query("SELECT count(*) FROM relay_assignments WHERE released_at IS NULL"),[["0"]],"Domain discovery must not reserve Brevo");
+    assert.deepEqual(await query("SELECT count(*) FROM allocation_requests WHERE install_requested_at IS NOT NULL"),[["0"]]);
     const noConsent = await form(
       "/portal/dns-credential",
       {
@@ -255,6 +260,7 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       cookie,
     );
     assert.equal(accepted.statusCode, 303);
+    assert.deepEqual(await query("SELECT count(*) FROM allocation_requests WHERE install_requested_at IS NOT NULL"),[["1"]],"Only the authorized install request activates allocation");
     const originalConsent = (
       await query("SELECT consented_at::text FROM onboarding_requests")
     )[0][0];

@@ -206,7 +206,7 @@ async function invite(email: string): Promise<string> {
   return response.body.invitationToken as string;
 }
 
-async function registerCustomer(local: string, name: string): Promise<{ token: string; email: string; organizationId: string; body: Record<string, any> }> {
+async function registerCustomerStartingInstallation(local: string, name: string): Promise<{ token: string; email: string; organizationId: string; body: Record<string, any> }> {
   const email = `${local}@recovery-bearportal.com`;
   const invitation = await invite(email);
   const token = await tokenFor(local, email);
@@ -216,6 +216,13 @@ async function registerCustomer(local: string, name: string): Promise<{ token: s
     body: JSON.stringify({ name, invitationToken: invitation }),
   });
   expectStatus(created, 201);
+  assert.equal(created.body.allocationState,"waiting_for_server","Registration alone must not reserve inventory");
+  // These inventory/installer fixtures start after the user's install authorization.
+  await superQuery(`UPDATE allocation_requests SET install_requested_at=now() WHERE organization_id=${sqlText(created.body.id as string)}`);
+  expectStatus(await api(base,"/internal/allocate",{method:"POST",headers:{"content-type":"application/json","x-bearportal-scheduler":schedulerToken},body:"{}"}),200);
+  const requested=await api(base,"/v1/organization/server",{headers:auth(token)});
+  expectStatus(requested,200);
+  created.body={...created.body,...requested.body,id:created.body.id};
   return { token, email, organizationId: created.body.id as string, body: created.body };
 }
 
@@ -376,7 +383,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
   });
 
   it("A05 keeps one verified owner and rechecks a nameserver change", async () => {
-    const wrongUser = await registerCustomer("a05-wrong", "Wrong Proof");
+    const wrongUser = await registerCustomerStartingInstallation("a05-wrong", "Wrong Proof");
     const wrongDomain = "proof-wrong.alpha-bearportal.com";
     zones.set(wrongDomain, { ok: false, code: "PROOF_REJECTED" });
     const wrong = await addDomain(wrongUser.token, wrongDomain);
@@ -404,8 +411,8 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
 
     const shared = "proof-shared.gamma-bearportal.com";
     zones.set(shared, goodZone(shared));
-    const ownerA = await registerCustomer("a05-owner-a", "Shared A");
-    const ownerB = await registerCustomer("a05-owner-b", "Shared B");
+    const ownerA = await registerCustomerStartingInstallation("a05-owner-a", "Shared A");
+    const ownerB = await registerCustomerStartingInstallation("a05-owner-b", "Shared B");
     const domainA = await addDomain(ownerA.token, shared);
     const domainB = await addDomain(ownerB.token, shared);
     const [first, second] = await Promise.all([
@@ -470,7 +477,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
     assert.equal(await scalar(`SELECT count(*) FROM required_actions WHERE code = 'domain.nameserver_recheck' AND state = 'open'`), "1");
 
     const conflictDomain = "proof-conflict.epsilon-bearportal.com";
-    const conflictUser = await registerCustomer("a05-conflict", "Conflict");
+    const conflictUser = await registerCustomerStartingInstallation("a05-conflict", "Conflict");
     const conflictRef = await addDomain(conflictUser.token, conflictDomain);
     const conflictZone = goodZone(conflictDomain);
     if (conflictZone.ok) {
@@ -489,7 +496,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
     assert.equal(conflict.body.error.code, "DNS_RECORD_CONFLICT");
     assert.equal(await scalar(`SELECT state FROM domains WHERE id = ${sqlText(conflictRef.domainId)}`), "pending");
 
-    const bareUser = await registerCustomer("a05-bare", "Bare");
+    const bareUser = await registerCustomerStartingInstallation("a05-bare", "Bare");
     const bare = await api(base, "/v1/domains", {
       method: "POST",
       headers: auth(bareUser.token, key("domain-bare")),
@@ -506,7 +513,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
   });
 
   it("A07 refuses an unready host and records the missing check", async () => {
-    const customer = await registerCustomer("a07-customer", "No Admin");
+    const customer = await registerCustomerStartingInstallation("a07-customer", "No Admin");
     const forbidden = await api(base, "/v1/admin/servers", {
       method: "POST",
       headers: auth(customer.token, key("customer-server")),
@@ -665,7 +672,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
     );
   });
 
-  it("A27 gives two servers to two of twenty concurrent registrations", async () => {
+  it("A27 gives two servers to two of twenty concurrent installation requests", async () => {
     const first = await makeAvailable("race-a");
     const second = await makeAvailable("race-b");
     const racers = await Promise.all(Array.from({ length: 20 }, async (_, index) => {
@@ -679,6 +686,13 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
       body: JSON.stringify({ name: `Racer ${racer.index}`, invitationToken: racer.invitation }),
     })));
     for (const result of results) expectStatus(result, 201);
+    assert.equal(results.filter(result=>result.body.allocationState==="allocated").length,0,"Concurrent registration does not consume servers");
+    await superQuery("UPDATE allocation_requests SET install_requested_at=now()");
+    await Promise.all(racers.map(()=>api(base,"/internal/allocate",{method:"POST",headers:{"content-type":"application/json","x-bearportal-scheduler":schedulerToken},body:"{}"})));
+    for(let i=0;i<racers.length;i++){
+      const view=await api(base,"/v1/organization/server",{headers:auth(racers[i]!.token)});
+      results[i]!.body={...results[i]!.body,...view.body,id:results[i]!.body.id};
+    }
     const allocated = results.filter((result) => result.body.allocationState === "allocated");
     const waiting = results.filter((result) => result.body.allocationState === "waiting_for_server");
     assert.equal(allocated.length, 2);
@@ -693,7 +707,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
     }
     for (const result of waiting) {
       assert.equal(result.body.server, null);
-      assert.equal(result.body.waitReason, undefined);
+      assert.equal(result.body.waitReason, "inventory.shortage");
     }
     assert.equal(await scalar(`SELECT count(*) FROM server_assignments WHERE released_at IS NULL`), "2");
     assert.equal(await scalar(`SELECT count(*) FROM outbox_events WHERE event_type = 'organization.allocate'`), "2");
@@ -712,8 +726,8 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
   });
 
   it("A28 waits without capacity and resumes the oldest customer once", async () => {
-    const older = await registerCustomer("a28-older", "Older");
-    const younger = await registerCustomer("a28-younger", "Younger");
+    const older = await registerCustomerStartingInstallation("a28-older", "Older");
+    const younger = await registerCustomerStartingInstallation("a28-younger", "Younger");
     assert.equal(older.body.allocationState, "waiting_for_server");
     assert.equal(older.body.server, null);
     assert.equal(younger.body.server, null);
@@ -808,8 +822,8 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
 
     const clean = await makeAvailable("clean");
     const dirty = await makeAvailable("dirty");
-    const cleanOrg = await registerCustomer("a29-clean", "Clean");
-    const dirtyOrg = await registerCustomer("a29-dirty", "Dirty");
+    const cleanOrg = await registerCustomerStartingInstallation("a29-clean", "Clean");
+    const dirtyOrg = await registerCustomerStartingInstallation("a29-dirty", "Dirty");
     assert.equal(cleanOrg.body.server.id, clean.serverId);
     assert.equal(dirtyOrg.body.server.id, dirty.serverId);
     const cleanView = await serverView(clean.serverId);
@@ -921,7 +935,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
     assert.equal(await scalar(`SELECT count(*) FROM server_assignments WHERE server_id = ${sqlText(dirty.serverId)} AND released_at IS NULL`), "1");
 
     await superQuery(`UPDATE servers SET state = 'available', validated_at = now(), last_heartbeat_at = now() WHERE id = ${sqlText(clean.serverId)}`);
-    const next = await registerCustomer("a29-next", "Next");
+    const next = await registerCustomerStartingInstallation("a29-next", "Next");
     assert.equal(next.body.allocationState, "waiting_for_server");
     assert.equal(next.body.server, null);
     assert.equal(await scalar(`SELECT state FROM servers WHERE id = ${sqlText(dirty.serverId)}`), "quarantined");
@@ -1003,12 +1017,12 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
     const fresh = await makeAvailable("fresh");
     const stale = await makeAvailable("stale-choice");
     await superQuery(`UPDATE servers SET last_heartbeat_at = now() - interval '10 minutes' WHERE id = ${sqlText(stale.serverId)}`);
-    const chooser = await registerCustomer("a30-chooser", "Chooser");
+    const chooser = await registerCustomerStartingInstallation("a30-chooser", "Chooser");
     assert.equal(chooser.body.server.id, fresh.serverId);
     assert.equal(await scalar(`SELECT state FROM servers WHERE id = ${sqlText(stale.serverId)}`), "available");
 
     const bound = await enrollReady({ label: "restore" });
-    const waiting = await registerCustomer("a30-restore", "Restore");
+    const waiting = await registerCustomerStartingInstallation("a30-restore", "Restore");
     assert.equal(waiting.body.server, null);
     const boundView = await serverView(bound.serverId);
     const binding = await api(base, `/v1/admin/servers/${bound.serverId}/recovery-binding`, {
@@ -1071,7 +1085,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
 
     await superQuery(`UPDATE servers SET state = 'available' WHERE id = ${sqlText(fresh.serverId)}`);
     const rivalHost = await makeAvailable("rival");
-    const rival = await registerCustomer("a30-rival", "Rival");
+    const rival = await registerCustomerStartingInstallation("a30-rival", "Rival");
     assert.equal(rival.body.server.id, rivalHost.serverId);
     assert.equal(
       await scalar(`SELECT server_id FROM server_assignments WHERE organization_id = ${sqlText(chooser.organizationId)} AND released_at IS NULL`),
@@ -1127,8 +1141,8 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
     expectStatus(listed, 200);
     assert.equal(listed.text.includes(apiCanary), false);
     const version = num(listed.body.relays.find((relay: { id: string }) => relay.id === created.body.id).version);
-    const owner = await registerCustomer("relay-owner", "Relay Owner");
-    const other = await registerCustomer("relay-other", "Relay Other");
+    const owner = await registerCustomerStartingInstallation("relay-owner", "Relay Owner");
+    const other = await registerCustomerStartingInstallation("relay-other", "Relay Other");
     assert.equal(owner.body.server.id, host.serverId);
     const assigned = await api(base, `/v1/admin/organizations/${owner.organizationId}/assign-relay`, {
       method: "POST",
@@ -1186,7 +1200,7 @@ describe("M3 inventory A05-A07 and A27-A30", { concurrency: false }, () => {
   });
 
   it("keeps waits failure-safe and fails closed without a live reader", async () => {
-    const waiter = await registerCustomer("wait-safe", "Waiting");
+    const waiter = await registerCustomerStartingInstallation("wait-safe", "Waiting");
     await superQuery(`
       INSERT INTO jobs (id, organization_id, kind, state, lease_expires_at)
       VALUES (${sqlText(randomUUID())}, ${sqlText(waiter.organizationId)}, 'install_release', 'queued', now() - interval '1 minute');

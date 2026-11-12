@@ -17,6 +17,7 @@ export function setupFailureCode(error: unknown): string {
 
 export function setupErrorMessage(code: string): string {
   const messages: Record<string, string> = {
+    DOMAIN_ALREADY_IN_USE: 'This domain already has a setup or installation under another account. An operator must review its ownership before setup can continue.',
     DOMAIN_DNS_NOT_FOUND: 'No DNS nameservers were found for the submitted domain. Check the domain spelling and registration; we’ll retry automatically.',
     MAILBOX_ADDRESS_CONFLICT: 'This domain’s mailbox address is already in use by an existing setup. Installation is paused. Use a different domain or ask an operator to review the existing domain assignment.',
     DNS_PROPAGATION: 'Brevo has not confirmed the domain verification records yet. Waiting for DNS; we’ll check again automatically.',

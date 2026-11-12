@@ -1400,10 +1400,11 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
     "SELECT code FROM required_actions WHERE state = 'open' ORDER BY created_at DESC LIMIT 50",
   );
   const waitlist = await db.query<{ organization_id: string; profile_code: string; verified_registered_at: Date }>(
-    `SELECT organization_id, profile_code, verified_registered_at
-     FROM allocation_requests
-     WHERE state = 'waiting_for_server'
-     ORDER BY verified_registered_at, id
+    `SELECT r.organization_id, r.profile_code, r.install_requested_at AS verified_registered_at
+     FROM allocation_requests r
+     WHERE r.state = 'waiting_for_server' AND r.install_requested_at IS NOT NULL AND r.cancelled_at IS NULL
+       AND NOT EXISTS(SELECT 1 FROM onboarding_requests setup WHERE setup.organization_id=r.organization_id AND setup.state='attention')
+     ORDER BY r.install_requested_at, r.id
      LIMIT 50`,
   );
   const relays = await db.query<{ id: string; version: number; archived_at:Date|null; owner_name:string|null; label: string; provider_account_id: string; smtp_login: string; daily_limit: number; state: string; assigned: boolean }>(

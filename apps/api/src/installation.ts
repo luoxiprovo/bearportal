@@ -1,3 +1,5 @@
+import {requestInstallationAllocation,installationRequested} from "./installation-request.ts";
+import {allocateProfile} from "../../../packages/servers/src/allocate.ts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { classifyBackupReport, evidenceReferenceAccepted } from "../../../packages/operations/src/lifecycle.ts";
@@ -932,6 +934,7 @@ export async function ensureAdminSecret(
 }
 
 async function assignRelay(db: Db, organizationId: string): Promise<{ id: string; smtp_login: string; smtp_secret_ref: string } | null> {
+  if(!await installationRequested(db,organizationId))return null;
   const existing = await db.query<{ id: string; smtp_login: string; smtp_secret_ref: string }>(
     `SELECT r.id, r.smtp_login, r.smtp_secret_ref
      FROM relay_assignments a
@@ -1475,6 +1478,11 @@ export async function createDeploymentForActor(ctx: InstallationContext, db: Db,
   const row = domain.rows[0];
   if (!row) throw new HttpError(404, "NOT_FOUND", "The domain was not found.");
   const plan = await loadPlan(db, actor.organizationId);
+  await requestInstallationAllocation(db,actor.organizationId,row.id);
+  await ctx.setActor(db,"allocator");
+  await allocateProfile(db,"e2-micro",100);
+  await ctx.setActor(db,"customer");
+
   const deploymentId = randomUUID();
   const mailHostname = `mail.${row.normalized_name}`;
   const webmailHostname = `bearmail.${row.normalized_name}`;

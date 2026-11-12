@@ -1,3 +1,4 @@
+import {assertInstallDomainAvailable} from "./installation-request.ts";
 import { setupFailureCode } from "./setup-errors.ts";
 import { refreshInstalledTls, type InstalledTlsProbe } from "./installed-tls.ts";
 import { refreshWaitingInventory } from "./refresh-inventory.ts";
@@ -187,6 +188,12 @@ export function registerOnboarding(
         if (!item.email_verified) {
           await defer("attention", "EMAIL_UNVERIFIED");
           return null;
+        }
+        try{await assertInstallDomainAvailable(db,item.organization_id,item.domain_id)}catch(error){
+          if(error instanceof HttpError&&error.code==="DOMAIN_ALREADY_IN_USE"){
+            await defer("attention","DOMAIN_ALREADY_IN_USE");await recordReview(db,item.organization_id,"DOMAIN_ALREADY_IN_USE");return null;
+          }
+          throw error;
         }
         await inventory.setActor(db, "allocator");
         await allocateProfile(db, "e2-micro", 100);
