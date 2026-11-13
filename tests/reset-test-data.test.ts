@@ -28,7 +28,7 @@ test('explicit test reset clears inventory and customers while preserving operat
  const root=mkdtempSync(join(tmpdir(),'bearportal-reset-test-'));
  const secrets=join(root,'secrets');mkdirSync(secrets);
  const name=randomUUID()+'.bin';writeFileSync(join(secrets,name),'encrypted-test-canary');
- await resetTestData({BEARPORTAL_ENV:'development',MIGRATION_DATABASE_URL:migrationUrl,BEARPORTAL_BACKUP_DATABASE_URL:superDatabaseUrl,BEARPORTAL_API_ORIGIN:'http://127.0.0.1:1',BEARPORTAL_SECRETS_DIR:secrets},root,['--confirm-clear-test-data']);
+ await resetTestData({BEARPORTAL_ENV:'development',MIGRATION_DATABASE_URL:migrationUrl,BEARPORTAL_BACKUP_DATABASE_URL:superDatabaseUrl,BEARPORTAL_API_ORIGIN:'https://app.example.org',PORT:'1',BEARPORTAL_SECRETS_DIR:secrets},root,['--confirm-clear-test-data']);
  assert.equal(existsSync(join(secrets,name)),false);
  const backups=join(root,'.data','backups');const backup=join(backups,readdirSync(backups)[0]);
  assert.ok(existsSync(join(backup,'database.dump')));
@@ -38,6 +38,7 @@ test('explicit test reset clears inventory and customers while preserving operat
  assert.deepEqual(await query('SELECT id,user_id FROM operator_roles'),[[role,admin]]);
  assert.deepEqual(await query('SELECT subject,user_id FROM identity_accounts'),[['admin',admin]]);
  assert.deepEqual(await query('SELECT count(*) FROM plans'),plans);
+ assert.deepEqual(await query('SELECT DISTINCT value FROM inventory_name_counters'),[['0']]);
  await query(CLEAR_TEST_DATA_SQL); // Repeating an empty reset is safe and keeps operator access.
  assert.deepEqual(await query('SELECT count(*) FROM users'),[['1']]);
 });
@@ -46,4 +47,19 @@ test('reset refuses unconfirmed and production invocations before any filesystem
  await assert.rejects(resetTestData({},'/unused',[]),/confirm-clear-test-data/);
  await assert.rejects(resetTestData({BEARPORTAL_ENV:'production'},'/unused',['--confirm-clear-test-data']),/development/);
  await assert.rejects(resetTestData({BEARPORTAL_ENV:'development',MIGRATION_DATABASE_URL:'postgres://example.com/bearportal'},'/unused',['--confirm-clear-test-data']),/local BearPortal database/);
+});
+
+
+test('Google-authenticated development reset refuses an active API even behind a public HTTPS origin',async()=>{
+ const {createServer}=await import('node:net');
+ const server=createServer(socket=>socket.end());
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address() as import('node:net').AddressInfo;
+ try {
+  await assert.rejects(resetTestData({BEARPORTAL_ENV:'development',BEARPORTAL_ALLOW_TEST_ISSUER:'0',MIGRATION_DATABASE_URL:migrationUrl,PORT:String(address.port),BEARPORTAL_API_ORIGIN:'https://app.example.org'},'/unused',['--confirm-clear-test-data']),/Stop BearPortal/);
+ } finally {await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+});
+
+test('reset rejects live Stripe configuration before contacting a database',async()=>{
+ await assert.rejects(resetTestData({BEARPORTAL_ENV:'development',MIGRATION_DATABASE_URL:migrationUrl,STRIPE_SECRET_KEY:'sk_live_synthetic'},'/unused',['--confirm-clear-test-data']),/Stripe/);
 });

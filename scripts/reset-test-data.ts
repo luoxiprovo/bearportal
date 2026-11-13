@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createConnection } from 'node:net';
 import pg from 'pg';
 
 // Keep operator identities and application configuration; all tenant and inventory records are disposable.
@@ -13,6 +14,7 @@ CREATE TEMP TABLE reset_operator_snapshot ON COMMIT DROP AS
 DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM operator_roles r JOIN users u ON u.id=r.user_id WHERE r.revoked_at IS NULL AND u.status='active') THEN RAISE EXCEPTION 'No operator account to preserve'; END IF;
  IF EXISTS(SELECT 1 FROM billing_subscriptions WHERE subscription_id IS NOT NULL AND status <> 'canceled') THEN RAISE EXCEPTION 'Cancel Stripe subscriptions before resetting local billing records'; END IF;
+ IF EXISTS(SELECT 1 FROM jobs WHERE state='running') THEN RAISE EXCEPTION 'A job is still running'; END IF;
  IF EXISTS(SELECT 1 FROM onboarding_requests WHERE state='installing') THEN RAISE EXCEPTION 'An installation is still running'; END IF;
 END $$;
 TRUNCATE TABLE billing_events,billing_subscriptions,cancellation_schedules,restore_requests,upgrade_plans,cleanup_reports,
@@ -25,6 +27,7 @@ TRUNCATE TABLE billing_events,billing_subscriptions,cancellation_schedules,resto
  RESTART IDENTITY CASCADE;
 DELETE FROM identity_accounts WHERE user_id NOT IN(SELECT id FROM reset_operator_snapshot);
 DELETE FROM users WHERE id NOT IN(SELECT id FROM reset_operator_snapshot);
+UPDATE inventory_name_counters SET value=0;
 UPDATE control_plane_state SET mode='normal' WHERE id=1;
 DO $$ BEGIN
  IF EXISTS(SELECT * FROM reset_operator_snapshot EXCEPT SELECT u.id,u.identity_subject,u.verified_email,r.role FROM users u JOIN operator_roles r ON r.user_id=u.id)
@@ -37,10 +40,22 @@ export async function resetTestData(env: Record<string, string>, root: string, a
   if (env.BEARPORTAL_ENV !== 'development' || process.env.BEARPORTAL_ENV === 'production') throw new Error('Test reset requires BEARPORTAL_ENV=development.');
   const database = new URL(env.MIGRATION_DATABASE_URL);
   if (!['127.0.0.1','localhost','[::1]'].includes(database.hostname) || !/^bearportal(?:_test_[a-z0-9_]+)?$/.test(decodeURIComponent(database.pathname.slice(1)))) throw new Error('Test reset only supports a local BearPortal database.');
-  // A stopped API prevents worker writes while the database and credential backup are taken.
-  let responding = false;
-  try { await fetch(env.BEARPORTAL_API_ORIGIN + '/healthz', {signal: AbortSignal.timeout(2000)}); responding = true; } catch { /* offline */ }
-  if (responding) throw new Error('Stop BearPortal before resetting data, then restart it afterward.');
+  if (env.BEARPORTAL_STRIPE_MODE === 'live' || (env.STRIPE_SECRET_KEY && !/^(sk|rk)_test_/.test(env.STRIPE_SECRET_KEY))) {
+    throw new Error('Test reset refuses live or unrecognized Stripe credentials. Use Stripe test mode.');
+  }
+  if (existsSync(join(root,'.data','server-migration-source.lock'))) throw new Error('Reset is blocked by a server migration fence.');
+  // Probe the API listener directly: public HTTPS still responds through Caddy when the API is stopped.
+  const port=Number(env.PORT || '8088');
+  if (!Number.isInteger(port) || port<1 || port>65535) throw new Error('PORT is invalid.');
+  const host=env.BEARPORTAL_BIND_HOST || '127.0.0.1';
+  if (!['127.0.0.1','::1','localhost','0.0.0.0','::'].includes(host)) throw new Error('Test reset requires a local API bind address.');
+  const responding=await new Promise<boolean>((resolve,reject)=>{
+    const socket=createConnection({host:host==='::'?'::1':host==='0.0.0.0'?'127.0.0.1':host,port});
+    socket.once('connect',()=>{socket.destroy();resolve(true)});
+    socket.once('error',(error:NodeJS.ErrnoException)=>{socket.destroy();if(error.code==='ECONNREFUSED')resolve(false);else reject(new Error('Could not verify that the API is stopped.'));});
+    socket.setTimeout(2000,()=>{socket.destroy();reject(new Error('Could not verify that the API is stopped.'));});
+  });
+  if (responding) throw new Error('Stop BearPortal with sudo systemctl stop bearportal-api before resetting data.');
   if (!env.BEARPORTAL_SECRETS_DIR) throw new Error('BEARPORTAL_SECRETS_DIR is required.');
   const secretsDir = env.BEARPORTAL_SECRETS_DIR;
   const files = existsSync(secretsDir) ? readdirSync(secretsDir).filter(name => /^[0-9a-f-]{36}\.bin$/i.test(name)) : [];
@@ -66,7 +81,7 @@ export async function resetTestData(env: Record<string, string>, root: string, a
   const client = new pg.Client({connectionString:env.MIGRATION_DATABASE_URL});
   await client.connect();
   try { await client.query(CLEAR_TEST_DATA_SQL); }
-  catch { await client.query('ROLLBACK'); throw new Error('Reset failed and was rolled back. Database and credentials are preserved.'); }
+  catch { await client.query('ROLLBACK'); throw new Error('Reset failed and was rolled back. Check that Stripe subscriptions are canceled, no installation/job is running, and an active operator exists. Database and credentials are preserved.'); }
   finally { await client.end(); }
   for(const name of files)unlinkSync(join(secretsDir,name));
   const state=join(root,'.data','trial','walk-state.json');if(existsSync(state))unlinkSync(state);

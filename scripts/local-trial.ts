@@ -15,6 +15,7 @@ import {
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseEnv } from "node:util";
 import { importPKCS8, SignJWT } from "jose";
 import pg from "pg";
 import { migrate } from "../packages/db/src/migrate.ts";
@@ -132,9 +133,9 @@ async function migrateCommand(): Promise<void> {
 }
 
 async function resetCommand(): Promise<void> {
-  const env = loadTrialEnv();
-  assertDevelopment(env);
-  await resetTestData(env as unknown as Record<string,string>, root, process.argv.slice(3));
+  if (!existsSync(envFile)) throw new Error("Missing .data/trial/env.");
+  const env = parseEnv(readFileSync(envFile, "utf8")) as Record<string, string>;
+  await resetTestData(env, root, process.argv.slice(3));
 }
 
 async function bootstrapCommand(): Promise<void> {
