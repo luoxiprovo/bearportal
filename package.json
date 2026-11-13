@@ -20,7 +20,8 @@
     "auth:configure": "tsx scripts/local-trial.ts auth-configure",
     "reset:test-data": "tsx scripts/local-trial.ts reset",
     "stripe:listen": "tsx scripts/stripe-listen.ts",
-    "operator:authorize": "tsx scripts/operator-access.ts"
+    "operator:authorize": "tsx scripts/operator-access.ts",
+    "stripe:cancel-test-subscriptions": "tsx scripts/cancel-test-subscriptions.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

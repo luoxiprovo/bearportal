@@ -4,7 +4,21 @@ Use this only when deliberately starting over with test customers and fresh inve
 
 ## Public development website: four steps
 
-1. **Cancel test subscriptions first, while the API is still running.** Use the customer's cancellation option or the Stripe Dashboard in the correct test environment. Choose immediate cancellation, not cancellation at the end of the billing period. Allow webhooks to arrive so BearPortal records the subscriptions as `canceled`. Trialing subscriptions also need cancellation. The reset refuses any subscription with a Stripe ID whose local status is not `canceled`.
+1. **Cancel test subscriptions first.** No customer login is needed. From the BearPortal checkout, preview subscriptions:
+
+   ```bash
+   pnpm stripe:cancel-test-subscriptions
+   ```
+
+   Then cancel the listed subscriptions immediately:
+
+   ```bash
+   pnpm stripe:cancel-test-subscriptions --confirm-cancel-test-subscriptions
+   ```
+
+   To target one customer, add `--email user@example.com` to both commands. The default previews all uncanceled subscriptions recorded in this development database, not every subscription in the Stripe account. The script reads `.data/trial/env`, requires development mode and test keys, and checks each subscription's test-mode flag, customer, organization metadata and configured price before any cancellation. It sets `invoice_now=false` and `prorate=false` ([Stripe cancellation API](https://docs.stripe.com/api/subscriptions/cancel)). It reconciles local records and opens normal operator cleanup tasks even if a webhook is delayed. It does not delete customers, refund invoices, or clean mail resources. On failure, earlier successful cancellations remain canceled; rerun the preview and retry. Repeating a completed cancellation is safe.
+
+   Alternatively, cancel through the customer's portal or the correct Stripe test Dashboard and wait for webhooks. Choose immediate cancellation rather than cancellation at period end. Trialing subscriptions also need cancellation. The reset refuses any subscription with a Stripe ID whose local status is not `canceled`.
 
 2. From the BearPortal checkout, stop the API service:
 
