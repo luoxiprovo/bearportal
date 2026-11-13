@@ -24,13 +24,14 @@ export function registerOnboarding(
   install: InstallationContext,
   intervalMs = 30_000,
   tlsProbe?: InstalledTlsProbe,
+  paused?: () => boolean,
 ) {
   let active: Promise<boolean> | null = null;
   let currentOrganization: string | null = null;
   let stopping = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   const run = (): Promise<boolean> => {
-    if (stopping) return Promise.resolve(false);
+    if (stopping || paused?.()) return Promise.resolve(false);
     if (active) return active;
     active = processOne()
       .catch(async (error) => {

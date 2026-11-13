@@ -1,9 +1,13 @@
+import { fileURLToPath } from "node:url";
+import { assertMigrationStartup } from "./migration-fence.ts";
 import { readFileSync, mkdirSync, accessSync, constants } from "node:fs";
 import { liveMailInstall } from "../../../packages/servers/src/mail-install.ts";
 import { liveSshProbe } from "../../../packages/servers/src/ssh-probe.ts";
 import { loadConfig } from "./config.ts";
 import { buildServer } from "./server.ts";
 
+const migrationFenceFile = fileURLToPath(new URL("../../../.data/server-migration-source.lock", import.meta.url));
+assertMigrationStartup(migrationFenceFile);
 const config = loadConfig(process.env);
 // Fail at startup if installation storage is unavailable, before accepting customer setups.
 mkdirSync("/var/lib/bearportal/work", { recursive: true, mode: 0o700 });
@@ -13,6 +17,7 @@ const devJwtPrivateKeyPem = config.allowDevIdentity && config.devJwtPrivateKeyFi
   ? readFileSync(config.devJwtPrivateKeyFile, "utf8")
   : undefined;
 const app = await buildServer({
+  migrationFenceFile,
   billing: config.billing,
   identityPlatform:config.identityPlatform,
   databaseUrl: config.databaseUrl,

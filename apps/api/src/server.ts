@@ -1,3 +1,4 @@
+import { migrationPaused, MIGRATION_PAGE } from "./migration-fence.ts";
 import {cookieValue} from "./auth-cookies.ts";
 import { registerBilling, requireSubscription, type BillingConfig } from "./billing.ts";
 import Stripe from "stripe";
@@ -55,6 +56,7 @@ const OPERATOR_ROLES = ["support", "infrastructure_operator", "platform_administ
 type OperatorRole = (typeof OPERATOR_ROLES)[number];
 
 export type ApiDeps = {
+  migrationFenceFile?: string;
   identityPlatform?:IdentityPlatformConfig;
   identityPlatformClient?:IdentityPlatformClient;
   lookupNameservers?: typeof defaultLookupNameservers;
@@ -142,6 +144,13 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
   });
   app.addHook("onRequest", async (request, reply) => {
     reply.header("x-request-id", request.id);
+    if (migrationPaused(deps.migrationFenceFile) && request.url.split("?")[0] !== "/healthz") {
+      reply.code(503).header("retry-after", "30").header("cache-control", "no-store");
+      if (request.method === "GET" && request.headers.accept?.includes("text/html")) {
+        return reply.type("text/html; charset=utf-8").send(MIGRATION_PAGE);
+      }
+      return reply.send({ error: { code: "MIGRATION_IN_PROGRESS", message: "BearPortal is moving to a new server. Please try again shortly.", retryable: true }, requestId: request.id });
+    }
   });
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof HttpError) {
@@ -180,7 +189,11 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     done(null, fields);
   });
 
-  app.get("/healthz", async (request) => ({ ok: true, requestId: request.id }));
+  app.get("/healthz", async (request, reply) => {
+    const maintenance = migrationPaused(deps.migrationFenceFile);
+    if (maintenance) reply.code(503);
+    return { ok: !maintenance, maintenance, migrationProtocol: 1, requestId: request.id };
+  });
 
   const homeState = (extra: HomeState = {}): HomeState => ({
     mode: deps.identityPlatform ? "identity" : deps.devJwtPrivateKeyPem ? "development" : "identity",
@@ -927,7 +940,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     schedulerToken: deps.schedulerToken,
   };
   registerInstallationRoutes(app, installationContext);
-  inventoryContext.onboardingRequested = registerOnboarding(app, inventoryContext, installationContext, deps.onboardingIntervalMs ?? 30_000, deps.installedTlsProbe);
+  inventoryContext.onboardingRequested = registerOnboarding(app, inventoryContext, installationContext, deps.onboardingIntervalMs ?? 30_000, deps.installedTlsProbe, () => migrationPaused(deps.migrationFenceFile));
 
   registerOversightRoutes(app, {
     withActor,

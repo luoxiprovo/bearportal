@@ -5,6 +5,7 @@ These procedures describe the current code. They do not imply that every lifecyc
 | Topic | Runbook |
 |---|---|
 | Local startup and adapters | [local-setup.md](local-setup.md) |
+| Move production to a new server | [server-migration.md](server-migration.md) |
 | systemd service | [systemd.md](systemd.md) |
 | Prepare a mail server | [preparation.md](preparation.md) |
 | SSH readiness and legacy enrollment | [enrollment.md](enrollment.md) |
