@@ -5,6 +5,7 @@ These procedures describe the current code. They do not imply that every lifecyc
 | Topic | Runbook |
 |---|---|
 | Local startup and adapters | [local-setup.md](local-setup.md) |
+| Clear development data, optionally including Google Identity users | [test-reset.md](test-reset.md) |
 | Move production to a new server | [server-migration.md](server-migration.md) |
 | systemd service | [systemd.md](systemd.md) |
 | Prepare a mail server | [preparation.md](preparation.md) |

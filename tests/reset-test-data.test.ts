@@ -28,6 +28,19 @@ test('explicit test reset clears inventory and customers while preserving operat
  const root=mkdtempSync(join(tmpdir(),'bearportal-reset-test-'));
  const secrets=join(root,'secrets');mkdirSync(secrets);
  const name=randomUUID()+'.bin';writeFileSync(join(secrets,name),'encrypted-test-canary');
+ const resetEnv={BEARPORTAL_ENV:'development',MIGRATION_DATABASE_URL:migrationUrl,BEARPORTAL_BACKUP_DATABASE_URL:superDatabaseUrl,BEARPORTAL_API_ORIGIN:'https://app.example.org',PORT:'1',BEARPORTAL_SECRETS_DIR:secrets};
+ await query(`INSERT INTO billing_subscriptions(organization_id,customer_id,subscription_id,status) VALUES('${org}','cus_reset_guard','sub_reset_guard','trialing')`);
+ let identityHookCalled=false;
+ await assert.rejects(resetTestData(resetEnv,root,['--confirm-clear-test-data'],{beforeClear:async()=>{identityHookCalled=true}}),/Cancel Stripe subscriptions/);
+ assert.equal(identityHookCalled,false,'Active subscription must block Google deletions');
+ await query('DELETE FROM billing_subscriptions');
+ await assert.rejects(resetTestData(resetEnv,root,['--confirm-clear-test-data'],{beforeClear:async backup=>{
+  assert.ok(existsSync(join(backup,'database.dump')));
+  assert.ok(existsSync(join(backup,'encrypted-secrets',name)));
+  throw Error('Google deletion interrupted');
+ }}),/Google deletion interrupted/);
+ assert.deepEqual(await query('SELECT count(*) FROM organizations'),[['1']]);
+ assert.ok(existsSync(join(secrets,name)));
  await resetTestData({BEARPORTAL_ENV:'development',MIGRATION_DATABASE_URL:migrationUrl,BEARPORTAL_BACKUP_DATABASE_URL:superDatabaseUrl,BEARPORTAL_API_ORIGIN:'https://app.example.org',PORT:'1',BEARPORTAL_SECRETS_DIR:secrets},root,['--confirm-clear-test-data']);
  assert.equal(existsSync(join(secrets,name)),false);
  const backups=join(root,'.data','backups');const backup=join(backups,readdirSync(backups)[0]);

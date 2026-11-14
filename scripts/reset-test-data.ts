@@ -6,7 +6,7 @@ import { createConnection } from 'node:net';
 import pg from 'pg';
 
 // Keep operator identities and application configuration; all tenant and inventory records are disposable.
-export const CLEAR_TEST_DATA_SQL = `
+export const RESET_TEST_PRECHECK_SQL = `
 BEGIN;
 SELECT set_config('bearportal.actor','platform_administrator',true);
 CREATE TEMP TABLE reset_operator_snapshot ON COMMIT DROP AS
@@ -16,7 +16,9 @@ DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM billing_subscriptions WHERE subscription_id IS NOT NULL AND status <> 'canceled') THEN RAISE EXCEPTION 'Cancel Stripe subscriptions before resetting local billing records'; END IF;
  IF EXISTS(SELECT 1 FROM jobs WHERE state='running') THEN RAISE EXCEPTION 'A job is still running'; END IF;
  IF EXISTS(SELECT 1 FROM onboarding_requests WHERE state='installing') THEN RAISE EXCEPTION 'An installation is still running'; END IF;
-END $$;
+END $$;`;
+
+export const CLEAR_TEST_DATA_SQL = RESET_TEST_PRECHECK_SQL + `
 TRUNCATE TABLE billing_events,billing_subscriptions,cancellation_schedules,restore_requests,upgrade_plans,cleanup_reports,
  audit_events,idempotency_keys,outbox_events,backups,jobs,dns_connections,deployments,
  secret_refs,domains,server_assignments,allocation_requests,invitations,organizations,
@@ -35,7 +37,7 @@ DO $$ BEGIN
 END $$;
 COMMIT;`;
 
-export async function resetTestData(env: Record<string, string>, root: string, args: string[]) {
+export async function resetTestData(env: Record<string, string>, root: string, args: string[], hooks?: { beforeClear: (backup: string) => Promise<void> }) {
   if (!args.includes('--confirm-clear-test-data')) throw new Error('This deletes local customers and inventory. Stop BearPortal, then run pnpm reset:test-data --confirm-clear-test-data. Operator access is preserved.');
   if (env.BEARPORTAL_ENV !== 'development' || process.env.BEARPORTAL_ENV === 'production') throw new Error('Test reset requires BEARPORTAL_ENV=development.');
   const database = new URL(env.MIGRATION_DATABASE_URL);
@@ -80,11 +82,20 @@ export async function resetTestData(env: Record<string, string>, root: string, a
   for(const name of files){copyFileSync(join(secretsDir,name),join(credentialBackup,name));chmodSync(join(credentialBackup,name),0o600);}
   const client = new pg.Client({connectionString:env.MIGRATION_DATABASE_URL});
   await client.connect();
-  try { await client.query(CLEAR_TEST_DATA_SQL); }
-  catch { await client.query('ROLLBACK'); throw new Error('Reset failed and was rolled back. Check that Stripe subscriptions are canceled, no installation/job is running, and an active operator exists. Database and credentials are preserved.'); }
+  try {
+    // Validate local prerequisites before an optional irreversible identity cleanup.
+    await client.query(RESET_TEST_PRECHECK_SQL + "ROLLBACK;");
+    await hooks?.beforeClear(backup);
+    await client.query(CLEAR_TEST_DATA_SQL);
+  }
+  catch (error) {
+    await client.query('ROLLBACK');
+    if (hooks) throw error;
+    throw new Error('Reset failed and was rolled back. Check that Stripe subscriptions are canceled, no installation/job is running, and an active operator exists. Database and credentials are preserved.');
+  }
   finally { await client.end(); }
   for(const name of files)unlinkSync(join(secretsDir,name));
   const state=join(root,'.data','trial','walk-state.json');if(existsSync(state))unlinkSync(state);
   console.log(`Cleared local customer and inventory data. Operator access, plans, app configuration and SSH keys are preserved. Backup: ${backup}`);
-  console.log('Remote servers, DNS, Brevo domains and Google Identity Platform accounts are unchanged. Add fresh resources before retesting.');
+  console.log(hooks ? 'Remote servers, DNS and Brevo domains are unchanged. Google cleanup results are in the private backup directory.' : 'Remote servers, DNS, Brevo domains and Google Identity Platform accounts are unchanged. Add fresh resources before retesting.');
 }

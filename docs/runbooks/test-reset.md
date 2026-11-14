@@ -45,6 +45,52 @@ Use this only when deliberately starting over with test customers and fresh inve
 
 Use the actual checkout path if different; migrations default to `/opt/bearportal`. Stop/start the service, rather than killing its process, because systemd would otherwise restart it automatically. HTTPS remains configured through Caddy; the website can show a temporary gateway error while the API is stopped.
 
+## Also delete Google Identity test accounts
+
+Use `pnpm reset:test-data:google` when you want users to register again from scratch. This deletes their **Identity Platform accounts in the configured project**, including password and Google sign-in bindings. It does not delete their personal Google/Gmail accounts. Operator emails, operator-authorized emails and operator UIDs are protected. The ordinary reset command continues to leave Google unchanged.
+
+### One-time Google admin access
+
+The script uses the active Google Cloud CLI account. The existing VM credentials currently lack the required admin access/OAuth scopes. On the server, authenticate as an administrator of the **Identity Platform project**, which can differ from the VM project:
+
+```bash
+gcloud auth login --no-launch-browser
+```
+
+Complete the browser instructions using an authorized Google Cloud administrator. The account needs `firebaseauth.users.get` and `firebaseauth.users.delete` on that project; the **Firebase Authentication Admin** role (`roles/firebaseauth.admin`) includes them. The script checks both permissions before deletion. The normal application's web API key cannot administer/delete other users, and does not need changing. Keep admin credentials private; no new secret belongs in Git. If organization policy disallows interactive login on the VM, use an approved admin identity with these same permissions instead.
+
+### Preview, then perform the combined reset
+
+First cancel test subscriptions using the earlier steps. Preview Google accounts while the API is still available:
+
+```bash
+pnpm reset:test-data:google
+```
+
+By default, selection includes customer emails still present in the local database. It never lists or deletes every user in the Google project. The preview prints the exact project ID and selected accounts. To include a Google account left after an earlier local reset or an unverified signup, explicitly supply its email:
+
+```bash
+pnpm reset:test-data:google --email luoxi@bearos.si
+```
+
+Repeat `--email` to select multiple addresses. When supplied, `--email` restricts **Google deletions only**. The confirmed command still clears **all local customers and inventory**, just like the ordinary reset.
+
+After reviewing the preview, stop the service and run the combined reset. Replace `PROJECT_ID` with the project printed by the preview; keep the same `--email` selections, if any:
+
+```bash
+sudo systemctl stop bearportal-api
+pnpm reset:test-data:google --project PROJECT_ID --confirm-delete-google-users --confirm-clear-test-data
+sudo systemctl start bearportal-api
+```
+
+For example, to include the previously registered address above, append `--email luoxi@bearos.si` to the reset command. No cloud user is deleted merely by previewing. Both confirmation flags and the matching project ID are mandatory. Passwords, hashes and tokens from Google's lookup response are discarded, rather than written to the preview or deletion receipt.
+
+The combined flow checks Google admin permissions, operator protection and local reset prerequisites, then makes the normal private database/credential backup **before any Google deletion**. It rechecks email-to-UID bindings before deleting. If Google deletion fails, local database data is retained; earlier Google deletions cannot be rolled back. A private `google-identity-cleanup.json` in the backup directory records planned and completed UIDs. Rerun the preview and repeat the confirmed command after correcting the error; already missing Google accounts are skipped. Never blindly run an old receipt as a deletion list.
+
+Google deletion and local SQL cannot form one atomic transaction. A local database backup does **not** restore a deleted Google password or sign-in account. If deletion has begun and any subsequent step fails, inspect the receipt and retry; do not assume that restoring PostgreSQL will restore Google access. After a successful combined reset, customers can register again. Existing browser sessions should sign out and start a fresh sign-in.
+
+References: [Google account lookup](https://docs.cloud.google.com/identity-platform/docs/reference/rest/v1/projects.accounts/lookup), [Google account deletion](https://docs.cloud.google.com/identity-platform/docs/reference/rest/v1/projects.accounts/delete), [permission preflight](https://docs.cloud.google.com/resource-manager/reference/rest/v1/projects/testIamPermissions).
+
 ## Local trial
 
 Stop the terminal running `pnpm trial:start`, run the same reset command, then use `pnpm trial:start` again. `pnpm trial:reset --confirm-clear-test-data` is an alias for the same reset implementation. Other `trial:*` commands still require the local test issuer; Google-authenticated deployments should keep using systemd and their normal Google operator login.
