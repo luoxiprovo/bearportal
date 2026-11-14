@@ -9,6 +9,46 @@ const identityKeys = createRemoteJWKSet(
 const googleKeys = createRemoteJWKSet(
   new URL("https://www.googleapis.com/oauth2/v3/certs"),
 );
+// Keep only known diagnostic codes; never expose Google's raw error text or submitted credentials.
+const providerDiagnostics = new Set([
+  "EMAIL_EXISTS",
+  "EMAIL_ALREADY_EXISTS",
+  "WEAK_PASSWORD",
+  "PASSWORD_DOES_NOT_MEET_REQUIREMENTS",
+  "INVALID_EMAIL",
+  "MISSING_EMAIL",
+  "MISSING_PASSWORD",
+  "ADMIN_ONLY_OPERATION",
+  "ADMIN_RESTRICTED_OPERATION",
+  "OPERATION_NOT_ALLOWED",
+  "PASSWORD_LOGIN_DISABLED",
+  "TOO_MANY_ATTEMPTS_TRY_LATER",
+  "QUOTA_EXCEEDED",
+  "CAPTCHA_CHECK_FAILED",
+  "MISSING_RECAPTCHA_TOKEN",
+  "INVALID_RECAPTCHA_TOKEN",
+  "USER_DISABLED",
+  "CONFIGURATION_NOT_FOUND",
+  "INVALID_API_KEY",
+  "API_KEY_INVALID",
+  "EMAIL_NOT_FOUND",
+  "INVALID_PASSWORD",
+  "INVALID_LOGIN_CREDENTIALS",
+]);
+export class IdentityPlatformError extends HttpError {
+  readonly providerCode: string;
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    providerCode: string,
+  ) {
+    super(status, code, message);
+    this.providerCode = providerDiagnostics.has(providerCode)
+      ? providerCode
+      : "UNRECOGNIZED_PROVIDER_ERROR";
+  }
+}
 export type IdentityTokens = { idToken: string; refreshToken: string };
 export type PlatformClaims = JWTPayload & {
   sub: string;
@@ -125,13 +165,92 @@ export function createIdentityPlatformClient(
       );
     }
     if (!response.ok) {
-      const code = String(result.error?.message ?? "").split(" : ")[0];
-      if(code==='PASSWORD_LOGIN_DISABLED')throw new HttpError(503,'PASSWORD_LOGIN_DISABLED','Email/password sign-in is not enabled yet. Use Google sign-in or contact the operator.');
+      const providerMessage =
+        typeof result.error?.message === "string" ? result.error.message : "";
+      const code =
+        /^[A-Z][A-Z0-9_]*(?=\s*:|\s*$)/.exec(providerMessage)?.[0] ??
+        "UNRECOGNIZED_PROVIDER_ERROR";
+      const failure = (
+        status: number,
+        publicCode: string,
+        message: string,
+      ): never => {
+        throw new IdentityPlatformError(status, publicCode, message, code);
+      };
       if (code === "TOO_MANY_ATTEMPTS_TRY_LATER" || response.status === 429)
-        throw new HttpError(
+        failure(
           429,
           "AUTH_RATE_LIMITED",
           "Too many attempts. Wait before trying again.",
+        );
+      if (method === "signUp") {
+        if (["EMAIL_EXISTS", "EMAIL_ALREADY_EXISTS"].includes(code))
+          failure(
+            409,
+            "ACCOUNT_EXISTS",
+            "An account with this email already exists. Sign in instead of creating a new account. If you used Google before, choose Continue with Google; otherwise use password reset if needed.",
+          );
+        if (
+          ["WEAK_PASSWORD", "PASSWORD_DOES_NOT_MEET_REQUIREMENTS"].includes(
+            code,
+          )
+        )
+          failure(
+            400,
+            "PASSWORD_REQUIREMENTS",
+            "Choose a stronger password with at least 12 characters, including uppercase and lowercase letters, a number and a symbol.",
+          );
+        if (["INVALID_EMAIL", "MISSING_EMAIL"].includes(code))
+          failure(400, "INVALID_EMAIL", "Enter a valid email address.");
+        if (code === "MISSING_PASSWORD")
+          failure(
+            400,
+            "PASSWORD_REQUIRED",
+            "Enter a password and repeat it in the confirmation field.",
+          );
+        if (
+          [
+            "ADMIN_ONLY_OPERATION",
+            "ADMIN_RESTRICTED_OPERATION",
+            "OPERATION_NOT_ALLOWED",
+            "PASSWORD_LOGIN_DISABLED",
+          ].includes(code)
+        )
+          failure(
+            503,
+            "SIGN_UP_DISABLED",
+            "Email/password account creation is disabled. Use Google sign-in or contact the operator.",
+          );
+        if (code === "QUOTA_EXCEEDED")
+          failure(
+            429,
+            "SIGN_UP_LIMIT_REACHED",
+            "The account creation limit has been reached. Please try again later or contact the operator.",
+          );
+        if (
+          [
+            "CAPTCHA_CHECK_FAILED",
+            "MISSING_RECAPTCHA_TOKEN",
+            "INVALID_RECAPTCHA_TOKEN",
+          ].includes(code)
+        )
+          failure(
+            400,
+            "SIGN_UP_VERIFICATION_FAILED",
+            "The signup security check failed. Refresh the page and try again. If it keeps failing, contact the operator.",
+          );
+        if (code === "USER_DISABLED")
+          failure(
+            403,
+            "ACCOUNT_DISABLED",
+            "This account has been disabled. Contact the operator.",
+          );
+      }
+      if (code === "PASSWORD_LOGIN_DISABLED")
+        failure(
+          503,
+          "PASSWORD_LOGIN_DISABLED",
+          "Email/password sign-in is not enabled yet. Use Google sign-in or contact the operator.",
         );
       if (
         [
@@ -143,29 +262,20 @@ export function createIdentityPlatformClient(
         response.status === 403 ||
         response.status >= 500
       )
-        throw new HttpError(
+        failure(
           503,
           "AUTH_UNAVAILABLE",
-          "Sign-in is temporarily unavailable. Please try again.",
+          method === "signUp"
+            ? "Account creation is temporarily unavailable because the sign-in service is not ready. Contact the operator or try again later."
+            : "Sign-in is temporarily unavailable. Please try again.",
         );
-      if (method === "signUp") {
-        if (["WEAK_PASSWORD", "PASSWORD_DOES_NOT_MEET_REQUIREMENTS"].includes(code))
-          throw new HttpError(
-            400,
-            "PASSWORD_REQUIREMENTS",
-            "Choose a stronger password with at least 12 characters, including uppercase and lowercase letters, a number and a symbol.",
-          );
-        if (code === "INVALID_EMAIL")
-          throw new HttpError(400, "INVALID_EMAIL", "Enter a valid email address.");
-        if (["ADMIN_ONLY_OPERATION", "ADMIN_RESTRICTED_OPERATION"].includes(code))
-          throw new HttpError(503, "SIGN_UP_DISABLED", "New account registration is not enabled. Contact the operator.");
-        throw new HttpError(
+      if (method === "signUp")
+        failure(
           400,
           "SIGN_UP_FAILED",
-          "Account creation could not be completed. If you registered before, including with Google, sign in instead or use password reset. Otherwise, check your email and password and try again.",
+          "The sign-in service rejected account creation without a recognized reason. Try again or contact the operator with the reference below.",
         );
-      }
-      throw new HttpError(
+      failure(
         401,
         "SIGN_IN_FAILED",
         "Sign-in could not be completed. Check your details or use password reset.",

@@ -7,7 +7,7 @@ import type {
   IdentityPlatformClient,
   IdentityTokens,
 } from "./identity-platform-client.ts";
-import { validatePlatformClaims } from "./identity-platform-client.ts";
+import { IdentityPlatformError, validatePlatformClaims } from "./identity-platform-client.ts";
 import { completeIdentityAccount } from "./identity-accounts.ts";
 import type { InventoryContext } from "./inventory.ts";
 import { HttpError } from "./errors.ts";
@@ -168,7 +168,9 @@ export function registerBrowserAuth(
       tokens = await client.password(body.email.toLowerCase(), body.password, true);
     } catch (error) {
       if (error instanceof HttpError)
-        request.log.warn({ code: error.code, status: error.status }, "Email/password registration failed");
+        request.log.warn({ code: error.code, status: error.status, ...(error instanceof IdentityPlatformError ? { providerCode: error.providerCode } : {}) }, "Email/password registration failed");
+      if (error instanceof HttpError && error.code === "SIGN_UP_FAILED")
+        throw new HttpError(error.status, error.code, `${error.message} Reference: ${request.id}.`);
       throw error;
     }
     const result = await finish(request, reply, tokens, origin);

@@ -69,6 +69,8 @@ Once bound, identity lookup uses issuer and UID, not a client-supplied user/orga
 
 - **Sign-in is not configured:** set all four variables and restart the API. Partial configurations are rejected at startup.
 - **Google origin/client error:** check the OAuth web client ID and exact authorized JavaScript origin.
+- **An account with this email already exists:** the address is already registered locally or in Google Identity Platform. Sign in, use Continue with Google if that was the original method, or use password reset. Clearing BearPortal test data does not delete Google Identity accounts.
+- **Password requirements / account creation disabled / signup security check / account creation limit:** signup displays a specific message for these provider failures. Backend registration warnings retain an allowlisted `providerCode` and request ID without raw provider text, passwords, keys or tokens. Unrecognized failures show a reference ID for operator investigation.
 - **Verification email delayed:** check Identity Platform email configuration/quotas, then use the resend button. The newly created upstream account and pending sign-in are retained.
 - **Sign-in temporarily unavailable:** check provider enablement, project/API key and API restrictions. Backend provider error bodies are not echoed to customers or logs.
 - **Existing account needs linking:** use verified email/password sign-in. A third-party Google email assertion without Gmail/Workspace authority does not automatically claim an older local account.

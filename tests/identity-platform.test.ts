@@ -14,6 +14,7 @@ import { generateKeyPair, SignJWT } from "jose";
 import {
   createIdentityVerifier,
   createIdentityPlatformClient,
+  IdentityPlatformError,
 } from "../apps/api/src/identity-platform-client.ts";
 import { readIdentityPlatformConfig } from "../apps/api/src/identity-platform-config.ts";
 import {
@@ -213,16 +214,23 @@ test("Identity Platform REST client validates Google nonce/audience, brokers pas
   providerError='PASSWORD_LOGIN_DISABLED';
   await assert.rejects(client.password('person@example.org','password-canary',false),error=>error instanceof HttpError&&error.status===503&&error.code==='PASSWORD_LOGIN_DISABLED');
   for (const [providerCode, expectedCode, message] of [
-    ["EMAIL_EXISTS", "SIGN_UP_FAILED", /including with Google/],
+    ["EMAIL_EXISTS", "ACCOUNT_EXISTS", /email already exists/],
+    ["EMAIL_ALREADY_EXISTS", "ACCOUNT_EXISTS", /Continue with Google/],
     ["WEAK_PASSWORD : password-canary", "PASSWORD_REQUIREMENTS", /stronger password/],
     ["PASSWORD_DOES_NOT_MEET_REQUIREMENTS", "PASSWORD_REQUIREMENTS", /stronger password/],
     ["INVALID_EMAIL", "INVALID_EMAIL", /valid email/],
-    ["ADMIN_ONLY_OPERATION", "SIGN_UP_DISABLED", /registration is not enabled/],
-    ["UNKNOWN : password-canary", "SIGN_UP_FAILED", /Account creation/],
+    ["ADMIN_ONLY_OPERATION", "SIGN_UP_DISABLED", /account creation is disabled/],
+    ["OPERATION_NOT_ALLOWED", "SIGN_UP_DISABLED", /account creation is disabled/],
+    ["PASSWORD_LOGIN_DISABLED", "SIGN_UP_DISABLED", /account creation is disabled/],
+    ["QUOTA_EXCEEDED", "SIGN_UP_LIMIT_REACHED", /limit has been reached/],
+    ["CAPTCHA_CHECK_FAILED", "SIGN_UP_VERIFICATION_FAILED", /security check failed/],
+    ["USER_DISABLED", "ACCOUNT_DISABLED", /disabled/],
+    ["UNKNOWN : password-canary", "SIGN_UP_FAILED", /without a recognized reason/],
+    ["WEAK_PASSWORD: password-canary", "PASSWORD_REQUIREMENTS", /stronger password/],
   ] as const) {
     providerError = providerCode;
     await assert.rejects(client.password("person@example.org", "password-canary", true), error =>
-      error instanceof HttpError && error.code === expectedCode && message.test(error.message) && !error.message.includes("password-canary"));
+      error instanceof IdentityPlatformError && error.code === expectedCode && message.test(error.message) && !error.message.includes("password-canary") && !error.providerCode.includes("password-canary") && (providerCode === "EMAIL_EXISTS" ? error.status === 409 : true));
   }
   providerError = "EMAIL_NOT_FOUND";
   await client.resetPassword("missing@example.org", config.origins[0]);

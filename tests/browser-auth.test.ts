@@ -9,6 +9,7 @@ import { exportSPKI, generateKeyPair, SignJWT } from "jose";
 import { buildServer, bootstrapAdmin } from "../apps/api/src/server.ts";
 import {
   createIdentityVerifier,
+  IdentityPlatformError,
   type IdentityPlatformClient,
   type IdentityTokens,
 } from "../apps/api/src/identity-platform-client.ts";
@@ -87,6 +88,10 @@ test("Identity Platform Google and password signup verify email, preserve legacy
     verify: createIdentityVerifier(config, remote.publicKey),
     password: async (email, value, signup) => {
       calls.push(signup ? "signup" : "signin");
+      if (signup && email === "provider-duplicate@example.org")
+        throw new IdentityPlatformError(409, "ACCOUNT_EXISTS", "An account with this email already exists. Sign in instead.", "EMAIL_EXISTS");
+      if (signup && email === "provider-unknown@example.org")
+        throw new IdentityPlatformError(400, "SIGN_UP_FAILED", "The sign-in service rejected account creation without a recognized reason.", "PRIVATE_PASSWORD_CANARY");
       if (value !== password)
         throw new HttpError(
           401,
@@ -238,6 +243,16 @@ test("Identity Platform Google and password signup verify email, preserve legacy
       ).statusCode,
       400,
     );
+    const upstreamDuplicate = await post("/auth/signup", { email: "provider-duplicate@example.org", password, confirmPassword: password });
+    assert.equal(upstreamDuplicate.statusCode, 409);
+    assert.equal(upstreamDuplicate.json().error.code, "ACCOUNT_EXISTS");
+    assert.match(upstreamDuplicate.json().error.message, /already exists/);
+    assert.ok(logs.some(line => line.toString().includes('"providerCode":"EMAIL_EXISTS"')));
+    const upstreamUnknown = await post("/auth/signup", { email: "provider-unknown@example.org", password, confirmPassword: password });
+    assert.equal(upstreamUnknown.statusCode, 400);
+    assert.match(upstreamUnknown.json().error.message, /Reference: [0-9a-f-]+/);
+    assert.equal(upstreamUnknown.body.includes("PRIVATE_PASSWORD_CANARY"), false);
+    assert.equal(Buffer.concat(logs).toString().includes("PRIVATE_PASSWORD_CANARY"), false);
     const signupCallsBefore = calls.filter(call => call === "signup").length;
     for (const confirmation of [undefined, "a-different-password"]) {
       const mismatch = await post("/auth/signup", {
