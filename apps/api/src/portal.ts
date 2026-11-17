@@ -546,6 +546,17 @@ function mailIcon(): string {
   return `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="6" y="12" width="36" height="26" rx="7" stroke="currentColor" stroke-width="2"/><path d="m8 15 13 11a5 5 0 0 0 6 0l13-11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 }
 
+function hasConfirmedShortage(view: CustomerPortalView): boolean {
+  return view.onboardingState === "waiting_resources" && ["server", "relay", "server_and_relay"].includes(view.missingResource ?? "");
+}
+
+function isAllocatingResources(view: CustomerPortalView): boolean {
+  if (view.installerStatus === "succeeded" || view.installerStatus === "tls_pending") return false;
+  if (view.onboardingState === "waiting_resources") return !hasConfirmedShortage(view);
+  return view.onboardingState === "queued" && !view.onboardingError &&
+    (!(view.serverId || view.allocationState === "allocated") || !view.relayAssigned);
+}
+
 export function setupProgress(view: CustomerPortalView): { current: number; complete: boolean; note: string; running: boolean } {
   const installed = view.onboardingState === "installed" || ["succeeded", "tls_pending"].includes(view.installerStatus ?? "");
   const complete = view.installerStatus === "succeeded";
@@ -554,7 +565,8 @@ export function setupProgress(view: CustomerPortalView): { current: number; comp
   const note = view.onboardingError ? setupErrorMessage(view.onboardingError)
     : complete ? "Bearmail and secure connections are ready. Reveal your administrator credentials below, create mailboxes, then test sending and receiving mail."
     : view.onboardingState === "attention" ? "Setup is paused for operator review. Your progress is saved."
-    : view.onboardingState === "waiting_resources" ? "Waiting for a server or mail-service account. No completion estimate is available until capacity is ready. We’ll continue automatically."
+    : isAllocatingResources(view) ? "Allocating resources. We’re checking and reserving a server and Brevo account for your setup."
+    : hasConfirmedShortage(view) ? "Waiting for a server or mail-service account. No completion estimate is available until capacity is ready. We’ll continue automatically."
     : installed ? "Bearmail is installed. Checking HTTPS certificates for the administrator and webmail sites."
     : current === 1 ? "Installing Bearmail on your allocated server. This usually takes several minutes; server preparation and downloads may take longer."
     : "Adding the domain’s DNS verification records and checking authentication with Brevo. DNS verification can take minutes to hours; we’ll continue automatically.";
@@ -562,12 +574,12 @@ export function setupProgress(view: CustomerPortalView): { current: number; comp
 }
 
 function renderSetupProgress(view: CustomerPortalView): string {
-  if ((!view.onboardingState && !view.installerStatus) || view.onboardingState === "waiting_resources") return "";
+  if ((!view.onboardingState && !view.installerStatus) || view.onboardingState === "waiting_resources" || isAllocatingResources(view)) return "";
   const { current, complete, note, running } = setupProgress(view);
   const labels = ["Verifying Brevo domain", "Installing Bearmail"];
   const animating = !complete && view.onboardingState !== "attention" && (running || current === 0);
-  const status = complete ? "Complete" : view.onboardingState === "attention" ? "Paused · needs attention" : running ? "Working" : "Waiting";
-  const statusMarkup = status === "Waiting" ? '<span class="waiting-status">Waiting<span aria-hidden="true">…</span></span>' : status;
+  const status = complete ? "Complete" : view.onboardingState === "attention" ? "Paused · needs attention" : running ? "Working" : "Waiting for DNS propagate";
+  const statusMarkup = status === "Waiting for DNS propagate" ? '<span class="waiting-status">Waiting for DNS propagate<span aria-hidden="true">…</span></span>' : status;
   const timing = !complete && view.onboardingState !== "attention" ? '<p class="setup-timing">The whole process, including domain records taking effect, may take about 7 minutes.</p>' : "";
   const value = complete ? 2 : current;
   const code = view.onboardingError;
@@ -592,7 +604,8 @@ function customerJourney(view: CustomerPortalView): string {
     : stage === 2 ? (view.detectedProvider ? "Connect your DNS provider" : "Check your DNS provider")
     : complete ? "Create your first mailbox"
     : view.onboardingState === "attention" ? "Wait for operator review"
-    : view.onboardingState === "waiting_resources" ? "Waiting for setup capacity"
+    : hasConfirmedShortage(view) ? "Waiting for setup capacity"
+    : isAllocatingResources(view) ? "Allocating resources"
     : view.onboardingState ? "Setup is in progress — no action needed"
     : "Authorize Bearmail installation";
   const help = canceled ? "No setup action is needed. Future subscription billing has stopped, and the operator has been notified to release your resources." : blocked ? "Complete the subscription step below to unlock domain setup."
@@ -601,7 +614,8 @@ function customerJourney(view: CustomerPortalView): string {
     : reconnect || stage === 2 ? "Have your provider’s API credential ready. The form below explains where to find it and asks for permission before changing mail routing."
     : complete ? "Open the administrator console below, reveal your administrator login, and create a mailbox. Then sign in to webmail and test sending and receiving."
     : view.onboardingState === "attention" ? "Your progress is saved. The operator needs to resolve the issue shown below; you don’t need to submit setup again."
-    : view.onboardingState === "waiting_resources" ? "Your DNS credentials and setup permission are saved. Installation will begin once a server and Brevo account are available."
+    : isAllocatingResources(view) ? "Your DNS credentials and setup permission are saved. We’re checking and reserving a server and Brevo account. This page updates automatically."
+    : hasConfirmedShortage(view) ? "Your DNS credentials and setup permission are saved. Installation will begin once a server and Brevo account are available."
     : view.onboardingState ? "This page updates automatically. You can close it and return later; we’ll continue from your saved progress."
     : "Review the mail-routing permission below, then choose Set up my Bearmail. Existing messages won’t be migrated.";
   return `<ol class="setup-checklist" aria-label="Your Bearmail setup checklist">${steps.map((label,i)=>{
@@ -613,15 +627,14 @@ function customerJourney(view: CustomerPortalView): string {
 export function renderCustomerPortal(view: CustomerPortalView): string {
   const domain = view.domainName ?? "";
   const hasServer = Boolean(view.serverId || view.allocationState === "allocated");
-  const waiting = view.onboardingState === "waiting_resources";
+  const waiting = hasConfirmedShortage(view);
+  const allocating = isAllocatingResources(view);
   const requested = Boolean(view.onboardingState);
   const installed = view.onboardingState === "installed" || view.installerStatus === "succeeded" || view.installerStatus === "tls_pending";
   const busy = requested && (view.installerStatus !== "succeeded");
-  const title = view.billing && !view.billing.entitled ? (view.billing.status === "none" ? "Start with your subscription." : "Review your subscription.") : installed ? (view.installerStatus === "succeeded" ? "Create your first mailbox." : "Finishing secure connections.") : waiting ? "Waiting for setup capacity." : requested ? "Setting up your Bearmail." : view.billing?.entitled ? (!domain ? "Add your domain." : !view.dnsState ? "Connect your DNS provider." : "Ready to install Bearmail.") : "Let’s make it yours.";
-  const subtitle = view.billing && !view.billing.entitled ? "Subscribe first, then connect your domain and install Bearmail." : installed ? `Bearmail is installed for ${domain}.` : waiting ? "Your domain connection is saved. Installation has not started." : requested ? "Your setup is saved. We’ll take it from here." : view.billing?.entitled ? (!domain ? "Your subscription is confirmed. Add your domain and continue setting up Bearmail." : "Your subscription is confirmed. Continue from your saved setup below.") : "A few simple steps. A place for all your mail.";
+  const title = view.billing && !view.billing.entitled ? (view.billing.status === "none" ? "Start with your subscription." : "Review your subscription.") : installed ? (view.installerStatus === "succeeded" ? "Create your first mailbox." : "Finishing secure connections.") : waiting ? "Waiting for setup capacity." : allocating ? "Allocating resources." : requested ? "Setting up your Bearmail." : view.billing?.entitled ? (!domain ? "Add your domain." : !view.dnsState ? "Connect your DNS provider." : "Ready to install Bearmail.") : "Let’s make it yours.";
+  const subtitle = view.billing && !view.billing.entitled ? "Subscribe first, then connect your domain and install Bearmail." : installed ? `Bearmail is installed for ${domain}.` : waiting ? "Your domain connection is saved. Installation has not started." : allocating ? "We’re checking and reserving a server and Brevo account for your setup." : requested ? "Your setup is saved. We’ll take it from here." : view.billing?.entitled ? (!domain ? "Your subscription is confirmed. Add your domain and continue setting up Bearmail." : "Your subscription is confirmed. Continue from your saved setup below.") : "A few simple steps. A place for all your mail.";
   const progress = view.billing && !view.billing.entitled ? "" : renderSetupProgress(view);
-  const shortage = !hasServer || view.missingResource === "relay" || view.missingResource === "server_and_relay";
-  const capacity = shortage && !waiting && !installed && view.onboardingState !== "attention" && (!view.billing || (view.billing.entitled && requested)) ? `<aside class="capacity-note" role="status"><span class="status-dot amber"></span><div><strong>A little more room is on the way.</strong><p>Resources are tight right now. ${requested ? `Your setup is saved. ${view.missingResource === "server" ? "Your mail-service account is reserved. We’re checking server availability and will continue automatically." : view.missingResource === "relay" ? "Your server is reserved. We’ll continue as soon as a mail-service account is available." : "We’ll deploy it as soon as a server and mail-service account are available."} You don’t need to submit it again.` : "You can connect your domain now. We’ll save your place and deploy as soon as capacity is available."}</p></div></aside>` : "";
   let card: string;
   if (view.billing && !view.billing.entitled) {
     card = billingCard(view.billing);
@@ -631,6 +644,8 @@ export function renderCustomerPortal(view: CustomerPortalView): string {
     card = `<section class="setup-card" id="domain"><p class="eyebrow">Connect your domain</p><h2>${escapeHtml(domain)}</h2>${providerNotice({nameservers:view.detectedNameservers,detectedProvider:view.detectedProvider})}${dnsCredentialForm({domain,detectedProvider:view.detectedProvider})}${!view.detectedProvider?customerDomainForm(domain):""}</section>`;
   } else if (!requested) {
     card = `<section class="setup-card" id="setup"><p class="eyebrow">Your Bearmail</p><h2>Everything in one place.</h2><p>Your domain provider is connected. We’ll verify the mail service and install Bearmail for <strong>${escapeHtml(domain)}</strong>.</p>${startSetupForm(domain)}</section>`;
+  } else if (allocating) {
+    card = `<section class="setup-card" id="setup" role="status"><span class="status-label">Allocating resources</span><h2>Preparing resources for your setup.</h2><p>Your domain connection and setup permission are saved. We’re checking availability and reserving a server and Brevo account.</p><p>We’ll continue automatically once allocation is complete. You don’t need to submit your DNS credentials again.</p></section>`;
   } else if (waiting) {
     const unavailable = view.missingResource === "server" ? "A server is currently unavailable."
       : view.missingResource === "relay" ? "A Brevo account is currently unavailable."
@@ -642,13 +657,13 @@ export function renderCustomerPortal(view: CustomerPortalView): string {
   } else if (installed) {
     card = `<section class="setup-card" id="setup"><span class="status-label">${view.installerStatus === "tls_pending" ? "Finishing the connection" : "Bearmail installed"}</span><h2>A home for your email.</h2><p>${view.installerStatus === "tls_pending" ? "Bearmail is installed. Secure connections may still be finishing. We’ll keep your setup status here." : "Your Bearmail installation is in place."}</p><div class="address-preview">${mailIcon()}<span>${escapeHtml(view.webmailHostname ?? `bearmail.${domain}`)}</span></div>${view.installerStatus === "succeeded" && view.webmailHostname ? `<a class="pill" href="https://${escapeHtml(view.webmailHostname)}" target="_blank" rel="noopener noreferrer">Open Bearmail ↗</a>` : ""}<p class="fine">${view.mailVerified ? "Mail delivery has been verified." : "Mail delivery and mailbox access still need verification. Installation alone doesn’t confirm that messages can be received or sent."}</p></section>`;
   } else {
-    const headline = waiting ? "Your place is saved." : view.onboardingState === "installing" ? "Making things ready." : "Connecting the pieces.";
-    card = `<section class="setup-card" id="setup" role="status"><span class="status-label ${waiting?'amber':''}">${waiting?"Waiting for capacity":view.onboardingState==="installing"?"Installing Bearmail":"Setting up your domain"}</span><h2>${headline}</h2><p>${waiting ? "We’ll continue automatically when resources are available. You can close this page and come back anytime." : view.onboardingError === "INSTALLER_STORAGE_UNAVAILABLE" || view.onboardingError === "INSTALLER_UNAVAILABLE" ? "Your domain connection is saved. We’re preparing the installation service and will retry automatically." : view.onboardingError === "DNS_PROPAGATION" ? "Your provider is connected. We’re waiting for the domain’s verification records to become visible." : "We’re authenticating your mail service and preparing your dedicated Bearmail installation. This can take a little while."}</p><div class="address-preview">${mailIcon()}<span>${escapeHtml(domain)}</span></div><p class="fine">Your progress is saved. No need to keep this page open.</p></section>`;
+    const headline = view.onboardingState === "installing" ? "Making things ready." : "Connecting the pieces.";
+    card = `<section class="setup-card" id="setup" role="status"><span class="status-label">${view.onboardingState==="installing"?"Installing Bearmail":"Setting up your domain"}</span><h2>${headline}</h2><p>${view.onboardingError === "INSTALLER_STORAGE_UNAVAILABLE" || view.onboardingError === "INSTALLER_UNAVAILABLE" ? "Your domain connection is saved. We’re preparing the installation service and will retry automatically." : view.onboardingError === "DNS_PROPAGATION" ? "Your provider is connected. We’re waiting for the domain’s verification records to become visible." : "We’re authenticating your mail service and preparing your dedicated Bearmail installation. This can take a little while."}</p><div class="address-preview">${mailIcon()}<span>${escapeHtml(domain)}</span></div><p class="fine">Your progress is saved. No need to keep this page open.</p></section>`;
   }
-  const summary = `<aside class="setup-summary"><p class="eyebrow">Your space</p><h3>${domain ? escapeHtml(domain) : "A domain of your own."}</h3><ul>${view.billing?`<li><span>Subscription</span><strong>${view.billing.entitled?(view.billing.status==="trialing"?"Free month active":"Active"):view.billing.status==="none"?"Not started":"Needs attention"}</strong></li>`:""}<li><span>Account</span><strong>${escapeHtml(view.recoveryEmail ?? "Registered")}</strong></li><li><span>Domain</span><strong>${domain ? "Saved" : "Up next"}</strong></li><li><span>Provider</span><strong>${providerLabel(view.detectedProvider ?? view.dnsProvider) || "We’ll find it for you"}</strong></li><li><span>Server</span><strong>${hasServer?"Reserved for you":requested?"Waiting for capacity":"Allocated during setup"}</strong></li><li><span>Mail service</span><strong>${view.relayAssigned?"Reserved for you":waiting?"Waiting for capacity":"Allocated during setup"}</strong></li></ul><p class="fine">Your mail runs on a server dedicated to your organization.</p></aside>`;
+  const summary = `<aside class="setup-summary"><p class="eyebrow">Your space</p><h3>${domain ? escapeHtml(domain) : "A domain of your own."}</h3><ul>${view.billing?`<li><span>Subscription</span><strong>${view.billing.entitled?(view.billing.status==="trialing"?"Free month active":"Active"):view.billing.status==="none"?"Not started":"Needs attention"}</strong></li>`:""}<li><span>Account</span><strong>${escapeHtml(view.recoveryEmail ?? "Registered")}</strong></li><li><span>Domain</span><strong>${domain ? "Saved" : "Up next"}</strong></li><li><span>Provider</span><strong>${providerLabel(view.detectedProvider ?? view.dnsProvider) || "We’ll find it for you"}</strong></li><li><span>Server</span><strong>${hasServer?"Reserved for you":waiting&&view.missingResource!=="relay"?"Waiting for capacity":requested?"Allocating":"Allocated during setup"}</strong></li><li><span>Mail service</span><strong>${view.relayAssigned?"Reserved for you":waiting&&view.missingResource!=="server"?"Waiting for capacity":requested?"Allocating":"Allocated during setup"}</strong></li></ul><p class="fine">Your mail runs on a server dedicated to your organization.</p></aside>`;
   const details = `<details class="service-details" id="account"><summary>Your account & service details</summary><div class="details-grid"><section><h2>Account</h2>${definition([["Email",view.recoveryEmail],["Domain",domain||"Not connected"],["Webmail",view.webmailHostname],["Mail server",view.mailHostname],["Plan",view.planCode??"Beta"]])}</section><section id="connections"><h2>Connection settings</h2>${definition([["IMAP",`${view.mailHostname??"Your mail hostname"} · 993 · TLS`],["SMTP submission",`${view.mailHostname??"Your mail hostname"} · 465 · TLS`],["JMAP",`${view.mailHostname??"Your mail hostname"} · 443`]])}<p class="fine">Use your mailbox address to sign in. Mailbox login is separate from BearPortal.</p></section><section id="mailboxes"><h2>Mailboxes</h2>${(view.mailboxes??[]).length?`<ul>${(view.mailboxes??[]).map(row=>`<li>${escapeHtml(row.localPart)}${domain?'@'+escapeHtml(domain):''} <span class="fine">${row.loginEnabled?"Login enabled":"Access pending"}</span></li>`).join("")}</ul>`:"<p>Your requested addresses will appear here.</p>"}<p class="fine">Requested addresses need to be applied to the mail server before use.</p></section><section id="backups"><h2>Backups and activity</h2><p>Backups are operator-reported. ${view.backupState?escapeHtml(view.backupState):"No backup is reported yet."}</p><ul>${[...(view.jobs??[]),...(view.events??[])].slice(0,5).map(row=>`<li>${escapeHtml(row.kind.replaceAll('_',' '))} <span class="fine">${escapeHtml(row.state)}</span></li>`).join("")}</ul></section></div><details class="support-details"><summary>Support information</summary>${definition([["Organization",view.organizationId],["Server address",view.publicIpv4],["Deployment",view.deploymentId],["Lifecycle",view.lifecycleState],["Health",view.healthState],["Installer status",view.installerStatus],["Live mail verified",view.mailVerified],["Cloud verified",false],["Required actions",view.requiredActions.join(", ")||"none"]])}${recordList(view.publishedRecords,"No published records are stored.")}</details></details>`;
   const refresh = busy ? `<script>setTimeout(function(){if(!document.querySelector('form:focus-within'))location.reload()},15000)</script>` : "";
-  return shell("Your Bearmail",`<a href="#account">Your account</a>${view.browserAuthEnabled?'<button type="button" class="nav-auth-button" data-auth-logout hidden>Sign out</button>':''}`,`<div class="welcome-heading"><p class="eyebrow">Welcome to your space</p><h1>${title}</h1><p>${escapeHtml(subtitle)}</p></div>${customerJourney(view)}${progress}${capacity}<div class="onboarding-grid" id="setup-next-step">${card}${summary}</div>${view.billing?.entitled?`<details class="subscription-details" id="billing-details"><summary>Subscription & billing · ${view.billing.status==="trialing"?"Free month active":"Active"}</summary>${billingCard(view.billing,!requested?(domain?"Continue Bearmail setup":"Add your domain"):undefined)}</details>`:""}${installed&&(!view.billing||view.billing.entitled)?mailAccessCard(view):''}${details}${refresh}${view.browserAuthEnabled?'<script src="/assets/auth.js" defer></script>':''}`,"app customer");
+  return shell("Your Bearmail",`<a href="#account">Your account</a>${view.browserAuthEnabled?'<button type="button" class="nav-auth-button" data-auth-logout hidden>Sign out</button>':''}`,`<div class="welcome-heading"><p class="eyebrow">Welcome to your space</p><h1>${title}</h1><p>${escapeHtml(subtitle)}</p></div>${customerJourney(view)}${progress}<div class="onboarding-grid" id="setup-next-step">${card}${summary}</div>${view.billing?.entitled?`<details class="subscription-details" id="billing-details"><summary>Subscription & billing · ${view.billing.status==="trialing"?"Free month active":"Active"}</summary>${billingCard(view.billing,!requested?(domain?"Continue Bearmail setup":"Add your domain"):undefined)}</details>`:""}${installed&&(!view.billing||view.billing.entitled)?mailAccessCard(view):''}${details}${refresh}${view.browserAuthEnabled?'<script src="/assets/auth.js" defer></script>':''}`,"app customer");
 }
 
 function mailAccessCard(view:CustomerPortalView):string {

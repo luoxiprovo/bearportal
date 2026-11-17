@@ -46,7 +46,8 @@ export async function enqueueOnboarding(
       "Our team needs to review the interrupted setup before restarting it.",
     );
   await requestInstallationAllocation(db,organizationId,domainId);
-  // Check capacity in the credential submission transaction so the first page is accurate.
+  // Detect shortages now, but let the worker recheck available SSH hosts with stale
+  // readiness evidence. Validation pending is allocation work, not a proven shortage.
   const previous = (await db.query<{ actor: string }>(
     "SELECT current_setting('bearportal.actor',true) AS actor",
   )).rows[0]?.actor ?? "";
@@ -58,8 +59,8 @@ export async function enqueueOnboarding(
        (EXISTS(SELECT 1 FROM server_assignments a JOIN servers s ON s.id=a.server_id
          WHERE a.organization_id=$1 AND a.released_at IS NULL AND s.state IN ('reserved','assigned'))
         OR EXISTS(SELECT 1 FROM servers s WHERE s.state='available' AND s.profile_code='e2-micro'
-         AND s.tenant_tainted_at IS NULL AND s.validated_at>now()-interval '5 minutes'
-         AND ((s.last_heartbeat_at>now()-interval '3 minutes' AND EXISTS(
+         AND s.tenant_tainted_at IS NULL
+         AND ((s.validated_at>now()-interval '5 minutes' AND s.last_heartbeat_at>now()-interval '3 minutes' AND EXISTS(
            SELECT 1 FROM host_identities h WHERE h.id=s.host_identity_id AND h.state='confirmed' AND h.revoked_at IS NULL))
            OR s.readiness_report->>'source'='ssh')
          AND NOT EXISTS(SELECT 1 FROM server_assignments a WHERE a.server_id=s.id AND a.released_at IS NULL)

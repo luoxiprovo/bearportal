@@ -27,7 +27,7 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
     assert.equal((html.slice(html.indexOf('<ol class="milestones"')).split("</ol>")[0].match(/aria-current="step"/g) ?? []).length, complete ? 0 : 1);
     assert.ok(html.includes('aria-label="Setup progress"'));
   }
-  assert.match(setupProgress({ ...connected, onboardingState: "waiting_resources" }).note, /No completion estimate/);
+  assert.match(setupProgress({ ...connected, onboardingState: "waiting_resources", missingResource: "server_and_relay" }).note, /No completion estimate/);
   assert.match(setupProgress({ ...connected, onboardingState: "attention" }).note, /paused for operator review/);
   const before = renderCustomerPortal(connected);
   assert.doesNotMatch(before, /role="progressbar"/);
@@ -49,7 +49,7 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
 
 
 test("Brevo verification animates during work and automatic waits while preserving the status text", () => {
-  const connected = { ...base, domainName: "example.com", dnsState: "stored" };
+  const connected = { ...base, domainName: "example.com", dnsState: "stored", serverId: "server", relayAssigned: true };
   for (const state of [
     { onboardingState: "queued" },
     { onboardingState: "queued", onboardingError: "DNS_PROPAGATION" },
@@ -59,7 +59,7 @@ test("Brevo verification animates during work and automatic waits while preservi
     assert.match(html, /Step 1 of 2 · Verifying Brevo domain/);
     assert.match(html, /class="milestone-number working-spinner" aria-hidden="true"><\/span><div><strong>Verifying Brevo domain/);
     if (state.onboardingState === "queued" && !state.onboardingError) assert.match(html, /<small>Working<\/small>/);
-    else assert.match(html, /class="waiting-status">Waiting/);
+    else assert.match(html, /class="waiting-status">Waiting for DNS propagate/);
     assert.match(html, /class="setup-timing">The whole process, including domain records taking effect, may take about 7 minutes/);
   }
   const paused = renderCustomerPortal({ ...connected, onboardingState: "attention", onboardingError: "DNS_ZONE_NOT_FOUND" });
@@ -111,4 +111,25 @@ test("capacity waits show saved credentials and exact shortages without installa
     assert.doesNotMatch(html, /Verifying Brevo domain|role="progressbar"|class="milestone-number working-spinner"|about 7 minutes|Setup is in progress/);
     assert.doesNotMatch(html, /action="\/portal\/dns-credential"|action="\/portal\/onboarding"/);
   }
+});
+
+
+test("unassigned resources show allocation while only explicit shortages show capacity waits", () => {
+  for (const assignment of [{}, { serverId: "server" }, { relayAssigned: true }]) {
+    const view = { ...base, domainName: "example.com", dnsState: "stored", onboardingState: "queued" as const, ...assignment };
+    const html = renderCustomerPortal(view);
+    assert.match(html, /Allocating resources/);
+    assert.match(html, /checking availability and reserving/);
+    assert.match(html, /location.reload/);
+    assert.match(setupProgress(view).note, /Allocating resources/);
+    assert.doesNotMatch(html, /Waiting for capacity|Waiting for setup capacity|currently unavailable|Resources are tight|A little more room|Verifying Brevo domain|about 7 minutes/);
+  }
+  const unknown = renderCustomerPortal({ ...base, domainName: "example.com", dnsState: "stored", onboardingState: "waiting_resources" });
+  assert.match(unknown, /Allocating resources/);
+  assert.doesNotMatch(unknown, /currently unavailable|Waiting for capacity/);
+  const beforeSetup = renderCustomerPortal({ ...base, domainName: "example.com" });
+  assert.doesNotMatch(beforeSetup, /Resources are tight|A little more room|Waiting for capacity/);
+  const assigned = renderCustomerPortal({ ...base, domainName: "example.com", dnsState: "stored", onboardingState: "queued", serverId: "server", relayAssigned: true });
+  assert.match(assigned, /Verifying Brevo domain/);
+  assert.doesNotMatch(assigned, /Allocating resources|Waiting for capacity|Resources are tight/);
 });

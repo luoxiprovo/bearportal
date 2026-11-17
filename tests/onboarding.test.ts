@@ -266,6 +266,27 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     assert.equal(immediate.body.includes("Verifying Brevo domain"), false);
     assert.equal(immediate.body.includes("about 7 minutes"), false);
     assert.equal(calls.length, 0, "Missing capacity must not call Brevo or publish DNS");
+    // Inventory can exist before assignments are made. Stale SSH evidence is rechecked
+    // by the worker; it must not flash a shortage while that check is pending.
+    const checkingServer = randomUUID(), checkingRelay = randomUUID();
+    await query(`INSERT INTO servers(id,label,public_ipv4,profile_code,operator_contact,state,validated_at,readiness_report)
+      VALUES(${sql(checkingServer)},'allocation-check','8.8.8.8','e2-micro','ops@example.org','available',now(),'{"source":"ssh"}');
+      INSERT INTO relay_connections(id,provider,label,provider_account_id,api_secret_ref,smtp_secret_ref,smtp_login,daily_limit,state)
+      SELECT ${sql(checkingRelay)},'brevo','allocation-check','allocation-check@example.org',secret_ref,secret_ref,'test-smtp',300,'inactive' FROM dns_connections LIMIT 1;`);
+    for (const validation of ["now()", "now()-interval '10 minutes'"]) {
+      await query(`UPDATE servers SET validated_at=${validation} WHERE id=${sql(checkingServer)}`);
+      const allocation = await form("/portal/onboarding", { csrf: "1" }, cookie);
+      assert.equal(allocation.statusCode, 303);
+      assert.deepEqual(await query("SELECT state,missing_resource FROM onboarding_requests"), [["queued", ""]]);
+      const allocating = await app.inject({ url: "/portal", headers: { cookie } });
+      assert.ok(allocating.body.includes("Allocating resources"));
+      assert.equal(/currently unavailable|Waiting for capacity|Resources are tight/.test(allocating.body), false);
+      assert.equal(allocating.body.includes("Verifying Brevo domain"), false);
+      assert.deepEqual(await query("SELECT count(*) FROM server_assignments"), [["0"]]);
+      assert.deepEqual(await query("SELECT count(*) FROM relay_assignments"), [["0"]]);
+      assert.equal(calls.length, 0);
+    }
+    await query(`DELETE FROM servers WHERE id=${sql(checkingServer)}; DELETE FROM relay_connections WHERE id=${sql(checkingRelay)}`);
     assert.deepEqual(await query("SELECT count(*) FROM allocation_requests WHERE install_requested_at IS NOT NULL"),[["1"]],"Only the authorized install request activates allocation");
     const originalConsent = (
       await query("SELECT consented_at::text FROM onboarding_requests")
