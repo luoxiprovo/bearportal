@@ -58,6 +58,30 @@ export async function resetTestData(env: Record<string, string>, root: string, a
     socket.setTimeout(2000,()=>{socket.destroy();reject(new Error('Could not verify that the API is stopped.'));});
   });
   if (responding) throw new Error('Stop BearPortal with sudo systemctl stop bearportal-api before resetting data.');
+  const { backup, files, secretsDir } = backupTestData(env, root);
+  const client = new pg.Client({connectionString:env.MIGRATION_DATABASE_URL});
+  await client.connect();
+  try {
+    // Validate local prerequisites before an optional irreversible identity cleanup.
+    await client.query(RESET_TEST_PRECHECK_SQL + "ROLLBACK;");
+    await hooks?.beforeClear(backup);
+    await client.query(CLEAR_TEST_DATA_SQL);
+  }
+  catch (error) {
+    await client.query('ROLLBACK');
+    if (hooks) throw error;
+    throw new Error('Reset failed and was rolled back. Check that Stripe subscriptions are canceled, no installation/job is running, and an active operator exists. Database and credentials are preserved.');
+  }
+  finally { await client.end(); }
+  for(const name of files)unlinkSync(join(secretsDir,name));
+  const state=join(root,'.data','trial','walk-state.json');if(existsSync(state))unlinkSync(state);
+  console.log(`Cleared local customer and inventory data. Operator access, plans, app configuration and SSH keys are preserved. Backup: ${backup}`);
+  console.log(hooks ? 'Remote servers, DNS and Brevo domains are unchanged. Google cleanup results are in the private backup directory.' : 'Remote servers, DNS, Brevo domains and Google Identity Platform accounts are unchanged. Add fresh resources before retesting.');
+}
+
+/** Private, validated local snapshot; callers must validate development configuration first. */
+export function backupTestData(env: Record<string, string>, root: string) {
+  const database = new URL(env.MIGRATION_DATABASE_URL);
   if (!env.BEARPORTAL_SECRETS_DIR) throw new Error('BEARPORTAL_SECRETS_DIR is required.');
   const secretsDir = env.BEARPORTAL_SECRETS_DIR;
   const files = existsSync(secretsDir) ? readdirSync(secretsDir).filter(name => /^[0-9a-f-]{36}\.bin$/i.test(name)) : [];
@@ -80,22 +104,5 @@ export async function resetTestData(env: Record<string, string>, root: string, a
   if (spawnSync('pg_restore',['--list',dump],{stdio:'pipe'}).status !== 0) throw new Error('Backup validation failed. No data was cleared.');
   const credentialBackup=join(backup,'encrypted-secrets');mkdirSync(credentialBackup,{mode:0o700});
   for(const name of files){copyFileSync(join(secretsDir,name),join(credentialBackup,name));chmodSync(join(credentialBackup,name),0o600);}
-  const client = new pg.Client({connectionString:env.MIGRATION_DATABASE_URL});
-  await client.connect();
-  try {
-    // Validate local prerequisites before an optional irreversible identity cleanup.
-    await client.query(RESET_TEST_PRECHECK_SQL + "ROLLBACK;");
-    await hooks?.beforeClear(backup);
-    await client.query(CLEAR_TEST_DATA_SQL);
-  }
-  catch (error) {
-    await client.query('ROLLBACK');
-    if (hooks) throw error;
-    throw new Error('Reset failed and was rolled back. Check that Stripe subscriptions are canceled, no installation/job is running, and an active operator exists. Database and credentials are preserved.');
-  }
-  finally { await client.end(); }
-  for(const name of files)unlinkSync(join(secretsDir,name));
-  const state=join(root,'.data','trial','walk-state.json');if(existsSync(state))unlinkSync(state);
-  console.log(`Cleared local customer and inventory data. Operator access, plans, app configuration and SSH keys are preserved. Backup: ${backup}`);
-  console.log(hooks ? 'Remote servers, DNS and Brevo domains are unchanged. Google cleanup results are in the private backup directory.' : 'Remote servers, DNS, Brevo domains and Google Identity Platform accounts are unchanged. Add fresh resources before retesting.');
+  return { backup, files, secretsDir };
 }

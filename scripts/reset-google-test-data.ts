@@ -35,20 +35,25 @@ export function createAdminIdentity(
       );
     return result.stdout.trim();
   },
-): AdminIdentity {
+): AdminIdentity & {
+  list: (project: string) => Promise<IdentityUser[]>;
+  lookupUid: (project: string, uid: string) => Promise<IdentityUser | null>;
+} {
   async function call(
     url: string,
-    body: Record<string, unknown>,
+    body: Record<string, unknown> | undefined,
+    project: string,
   ): Promise<Record<string, any>> {
     let response: Response;
     try {
       response = await transport(url, {
-        method: "POST",
+        method: body === undefined ? "GET" : "POST",
         headers: {
           authorization: "Bearer " + token(),
           "content-type": "application/json",
+          "x-goog-user-project": project,
         },
-        body: JSON.stringify(body),
+        body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(15000),
         redirect: "error",
       });
@@ -82,7 +87,47 @@ export function createAdminIdentity(
     encodeURIComponent(project) +
     "/accounts:" +
     method;
+  function safeUser(user: any): IdentityUser {
+    if (typeof user.localId !== "string" || !user.localId || user.tenantId ||
+        (user.email !== undefined && typeof user.email !== "string"))
+      throw new IdentityCleanupError("Invalid default-tenant Google user response.");
+    return {
+      uid: user.localId,
+      email: (user.email ?? "").toLowerCase(),
+      providers: (user.providerUserInfo ?? []).map((p: any) => String(p.providerId)),
+    };
+  }
   return {
+    list: async (project) => {
+      const users: IdentityUser[] = [];
+      const pages = new Set<string>();
+      let page = "";
+      do {
+        const query = new URLSearchParams({ maxResults: "1000" });
+        if (page) query.set("nextPageToken", page);
+        const result = await call(endpoint(project, "batchGet") + "?" + query, undefined, project);
+        if (result.users !== undefined && !Array.isArray(result.users))
+          throw new IdentityCleanupError("Invalid Google user list response.");
+        users.push(...(result.users ?? []).map(safeUser));
+        page = result.nextPageToken ?? "";
+        if (typeof page !== "string" || (page && pages.has(page)))
+          throw new IdentityCleanupError("Invalid Google pagination token.");
+        if (page) pages.add(page);
+      } while (page);
+      if (new Set(users.map(u => u.uid)).size !== users.length)
+        throw new IdentityCleanupError("Duplicate Google UIDs; rerun preview.");
+      return users;
+    },
+    lookupUid: async (project, uid) => {
+      const result = await call(endpoint(project, "lookup"), { localId: [uid] }, project);
+      if (result.users === undefined) return null;
+      if (!Array.isArray(result.users) || result.users.length > 1)
+        throw new IdentityCleanupError("Invalid Google UID lookup response.");
+      if (!result.users.length) return null;
+      const user = safeUser(result.users[0]);
+      if (user.uid !== uid) throw new IdentityCleanupError("Google UID lookup mismatch.");
+      return user;
+    },
     permissions: async (project) => {
       const required = ["firebaseauth.users.get", "firebaseauth.users.delete"];
       const result = await call(
@@ -90,6 +135,7 @@ export function createAdminIdentity(
           encodeURIComponent(project) +
           ":testIamPermissions",
         { permissions: required },
+        project,
       );
       if (
         !Array.isArray(result.permissions) ||
@@ -102,7 +148,7 @@ export function createAdminIdentity(
     lookup: async (project, email) => {
       const result = await call(endpoint(project, "lookup"), {
         email: [email],
-      });
+      }, project);
       if (result.users !== undefined && !Array.isArray(result.users))
         throw new IdentityCleanupError(
           "Invalid Google account lookup response.",
@@ -129,7 +175,7 @@ export function createAdminIdentity(
       });
     },
     remove: async (project, uid) => {
-      await call(endpoint(project, "delete"), { localId: uid });
+      await call(endpoint(project, "delete"), { localId: uid }, project);
     },
   };
 }

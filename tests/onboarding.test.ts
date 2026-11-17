@@ -260,6 +260,12 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       cookie,
     );
     assert.equal(accepted.statusCode, 303);
+    assert.deepEqual(await query("SELECT state,missing_resource FROM onboarding_requests"), [["waiting_resources", "server_and_relay"]], "Capacity shortage is persisted before the worker runs");
+    const immediate = await app.inject({ url: "/portal", headers: { cookie } });
+    assert.ok(immediate.body.includes("A server and a Brevo account are currently unavailable."));
+    assert.equal(immediate.body.includes("Verifying Brevo domain"), false);
+    assert.equal(immediate.body.includes("about 7 minutes"), false);
+    assert.equal(calls.length, 0, "Missing capacity must not call Brevo or publish DNS");
     assert.deepEqual(await query("SELECT count(*) FROM allocation_requests WHERE install_requested_at IS NOT NULL"),[["1"]],"Only the authorized install request activates allocation");
     const originalConsent = (
       await query("SELECT consented_at::text FROM onboarding_requests")
@@ -298,8 +304,8 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       "waiting_resources,server_and_relay",
     );
     const waiting = await app.inject({ url: "/portal", headers: { cookie } });
-    assert.ok(waiting.body.includes("Resources are tight right now"));
-    assert.ok(waiting.body.includes("You don’t need to submit it again"));
+    assert.ok(waiting.body.includes("A server and a Brevo account are currently unavailable."));
+    assert.ok(waiting.body.includes("You don’t need to submit your DNS credentials again"));
     assert.equal(waiting.body.includes(credentials), false);
     await app.close();
     app = await buildServer(deps);

@@ -22,7 +22,10 @@
     "stripe:listen": "tsx scripts/stripe-listen.ts",
     "operator:authorize": "tsx scripts/operator-access.ts",
     "stripe:cancel-test-subscriptions": "tsx scripts/cancel-test-subscriptions.ts",
-    "reset:test-data:google": "tsx scripts/reset-google-test-data.ts"
+    "reset:test-data:google": "tsx scripts/reset-google-test-data.ts",
+    "google:delete-users": "tsx scripts/delete-google-users.ts",
+    "reset:test-data:all": "tsx scripts/reset-all-test-data.ts",
+    "dns:cleanup": "tsx scripts/dns-cleanup.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

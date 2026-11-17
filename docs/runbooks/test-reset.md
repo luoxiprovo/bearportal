@@ -2,6 +2,41 @@
 
 Use this only when deliberately starting over with test customers and fresh inventory. Ordinary startup and automated tests do not need a reset. This supports both local trial sign-in and real Google Identity Platform sign-in in **development mode**, including `https://app.bearos.si`. Keep the test issuer disabled on the public website.
 
+## One command: reset Stripe, Google Identity and local data
+
+Use `pnpm reset:test-data:all` to automate the reset while deliberately **skipping external resource cleanup**. This cancels matching Stripe test subscriptions, deletes matching Stripe customers, deletes all non-operator Google Identity accounts in the default tenant, and clears local customer data and server/Brevo inventory. Operator accounts, application settings, Stripe products/prices/portal configuration, SSH keys and existing backups remain.
+
+1. From the checkout, check Google admin login and preview:
+
+   ```bash
+   cd ~/bearportal
+   gcloud auth list
+   pnpm reset:test-data:all
+   ```
+
+   If necessary, run `gcloud auth login --no-launch-browser` using the project administrator and preview again. Review `googlePreserved`, `googleSelected`, `stripeCustomers` and local inventory counts. No service is stopped and no user/customer is deleted by preview.
+
+2. Refresh sudo credentials, then confirm using the exact project and Stripe account from preview. For this deployment:
+
+   ```bash
+   sudo -v
+   pnpm reset:test-data:all --project natural-iridium-506117-i4 --stripe-account acct_1UaonvJx2CYKdb9U --confirm-reset-all-test-data
+   ```
+
+The confirmed run stops `bearportal-api`, verifies its listener is stopped, backs up PostgreSQL and encrypted credentials, rechecks the cloud plan, cancels subscriptions, deletes Stripe customers, deletes Google users, clears local data, and verifies the result. If the API was initially running, it restarts it and checks `/healthz`; if it was already stopped, it remains stopped. Local clearing also makes its normal backup. The first private backup contains `full-reset-receipt.json` with selected accounts, local inventory counts and completed actions. Keep the database and encrypted credential backup together with the existing private app configuration to recover local records. This cannot restore deleted Google credentials or Stripe customers.
+
+**Stripe scope:** customers recorded locally or tagged with an `organizationId` UUID, including leftovers from earlier local resets. Every subscription on a selected customer must match that organization and the configured Price ID. This metadata convention identifies BearPortal customers, not an individual deployment; do not share this convention and Price ID with another deployment in the same Stripe test account unless you intend to reset its tagged customers too. Untagged/unrelated customers are skipped and counted. A selected customer matching an operator email is refused for manual review. The runtime Stripe key needs account read, customer list/read/delete and subscription list/read/cancel permissions. Stripe can retain historical invoices, canceled subscriptions and deleted-customer records; this is not a Stripe-wide history purge.
+
+**Skipped:** no VM/disk/snapshot deletion, remote mail-store or backup removal, Brevo provider-side domain/account cleanup, DNS changes, or old local backup deletion. Local inventory/assignment records are cleared, so use the saved backup/receipt and your provider inventory for later manual cleanup. Add clean or properly rebuilt resources before installation tests. External resources can remain active and billable after reset.
+
+**Failure:** the command stops at the first error. Earlier cloud cancellations/deletions are irreversible; remaining local records are retained unless local clearing already committed. After stopping, the API remains stopped on failure. Inspect the printed receipt, correct the problem and rerun the preview before retrying. Start the service manually when appropriate:
+
+```bash
+sudo systemctl start bearportal-api
+```
+
+A process lock at `.data/full-test-reset.lock` prevents concurrent combined resets. A forced kill can leave it behind; inspect `owner.json`, verify the old process has ended, and only then remove the stale lock. Do not run other reset scripts, signup workers or manual identity changes concurrently. After a successful run, sign out in your browser and sign in again; browser cookies cannot be cleared by a server-side reset command.
+
 ## Public development website: four steps
 
 1. **Cancel test subscriptions first.** No customer login is needed. From the BearPortal checkout, preview subscriptions:
@@ -90,6 +125,30 @@ The combined flow checks Google admin permissions, operator protection and local
 Google deletion and local SQL cannot form one atomic transaction. A local database backup does **not** restore a deleted Google password or sign-in account. If deletion has begun and any subsequent step fails, inspect the receipt and retry; do not assume that restoring PostgreSQL will restore Google access. After a successful combined reset, customers can register again. Existing browser sessions should sign out and start a fresh sign-in.
 
 References: [Google account lookup](https://docs.cloud.google.com/identity-platform/docs/reference/rest/v1/projects.accounts/lookup), [Google account deletion](https://docs.cloud.google.com/identity-platform/docs/reference/rest/v1/projects.accounts/delete), [permission preflight](https://docs.cloud.google.com/resource-manager/reference/rest/v1/projects/testIamPermissions).
+
+## Delete every Google test user except operators
+
+Use this separate command to include Google-only accounts left after local resets. It enumerates all accounts in the configured project's **default tenant**, including accounts without email. It does not clear local BearPortal data, cancel subscriptions, release resources, or affect personal Google/Gmail accounts.
+
+Authenticate using the Google admin login described above, then preview:
+
+```bash
+pnpm google:delete-users
+```
+
+Review both `preserved` and `selected`. Operator UIDs, operator emails, operator-authorized emails and the bootstrap administrator email are protected, including historical operator assignments. The command requires development/test configuration, the local database, an active operator, and at least one protected Google account. If the database is unavailable or protection cannot be established, it refuses deletion.
+
+Stop the API and pause other signups/operator changes, then use the project shown in the preview:
+
+```bash
+sudo systemctl stop bearportal-api
+pnpm google:delete-users --project PROJECT_ID --confirm-delete-non-operators
+sudo systemctl start bearportal-api
+```
+
+No email list is needed. Operator protection and each selected UID are checked again before deletion; newly created accounts after enumeration are left for the next run. The deletion is irreversible, and ongoing external identity/operator changes cannot be made atomic with Google deletion. A private `.data/backups/google-users-delete-*/receipt.json` records planned UIDs and completed results without passwords or tokens. If a run fails, earlier deletions remain; rerun the preview before retrying. Existing customer sessions should sign out. Local data and Stripe subscriptions still need their own reset/cancellation workflow.
+
+Google admin requests explicitly use the Identity Platform project as the quota project. The administrator also needs permission to use services on that project (`serviceusage.services.use`) in addition to the user get/delete permissions.
 
 ## Local trial
 

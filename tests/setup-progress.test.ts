@@ -12,7 +12,6 @@ const base: CustomerPortalView = {
 test("setup milestones reflect the saved stage and do not promise readiness before HTTPS", () => {
   const connected = { ...base, domainName: "example.com", dnsState: "stored" };
   const cases: [Partial<CustomerPortalView>, number, boolean][] = [
-    [{ ...connected, onboardingState: "waiting_resources" }, 0, false],
     [{ ...connected, onboardingState: "queued", onboardingError: "DNS_PROPAGATION" }, 0, false],
     [{ ...connected, onboardingState: "installing" }, 1, false],
     [{ ...connected, onboardingState: "attention", onboardingError: "INSTALLER_FAILED", brevoAuthenticated: true, brevoVerified: true }, 1, false],
@@ -55,7 +54,6 @@ test("Brevo verification animates during work and automatic waits while preservi
     { onboardingState: "queued" },
     { onboardingState: "queued", onboardingError: "DNS_PROPAGATION" },
     { onboardingState: "queued", onboardingError: "BREVO_UNAVAILABLE" },
-    { onboardingState: "waiting_resources" },
   ] as const) {
     const html = renderCustomerPortal({ ...connected, ...state });
     assert.match(html, /Step 1 of 2 · Verifying Brevo domain/);
@@ -94,4 +92,23 @@ test("customer journey shows the saved next action and keeps active billing belo
   const unpaid = renderCustomerPortal({ ...base, billing: { ...billing, entitled: false, status: "none", trialAvailable: true } });
   assert.match(unpaid, /id="next-step-title">Start your subscription/);
   assert.doesNotMatch(unpaid, /action="\/portal\/domain"/);
+});
+
+
+test("capacity waits show saved credentials and exact shortages without installation progress", () => {
+  for (const [missingResource, message] of [
+    ["server", "A server is currently unavailable."],
+    ["relay", "A Brevo account is currently unavailable."],
+    ["server_and_relay", "A server and a Brevo account are currently unavailable."],
+  ]) {
+    const html = renderCustomerPortal({ ...base, domainName: "example.com", dnsState: "stored", onboardingState: "waiting_resources", missingResource });
+    assert.match(html, /Waiting for setup capacity/);
+    assert.ok(html.includes(message));
+    assert.match(html, /Installation has not started/);
+    assert.match(html, /Your DNS credentials and setup permission are saved/);
+    assert.match(html, /continue automatically/);
+    assert.match(html, /location.reload/);
+    assert.doesNotMatch(html, /Verifying Brevo domain|role="progressbar"|class="milestone-number working-spinner"|about 7 minutes|Setup is in progress/);
+    assert.doesNotMatch(html, /action="\/portal\/dns-credential"|action="\/portal\/onboarding"/);
+  }
 });

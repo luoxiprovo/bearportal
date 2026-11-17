@@ -156,6 +156,10 @@ test("Google admin transport uses project-scoped OAuth and discards credential f
       (init?.headers as Record<string, string>).authorization,
       "Bearer private-token-canary",
     );
+    assert.equal(
+      (init?.headers as Record<string, string>)["x-goog-user-project"],
+      env.BEARPORTAL_IDENTITY_PROJECT_ID,
+    );
     return new Response(
       JSON.stringify(
         url.includes("testIamPermissions")
