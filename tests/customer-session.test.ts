@@ -74,7 +74,7 @@ test("customer forms refresh before sending once and retain the form on expired 
   const missing = await submitCase(true, false);
   assert.equal(missing.submits, 0);
   assert.equal(missing.calls.length, 1);
-  assert.match(missing.errors[0].textContent, /sign-in has expired/);
+  assert.match(missing.errors[0].textContent, /Session expired/);
   const trial = await submitCase(false, false);
   assert.equal(trial.submits, 1);
   assert.equal(trial.calls.length, 1);

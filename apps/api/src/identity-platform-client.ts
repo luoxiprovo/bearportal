@@ -188,7 +188,7 @@ export function createIdentityPlatformClient(
           failure(
             409,
             "ACCOUNT_EXISTS",
-            "An account with this email already exists. Sign in instead of creating a new account. If you used Google before, choose Continue with Google; otherwise use password reset if needed.",
+            "This email already has an account. Sign in with Google or reset your password.",
           );
         if (
           ["WEAK_PASSWORD", "PASSWORD_DOES_NOT_MEET_REQUIREMENTS"].includes(
@@ -198,7 +198,7 @@ export function createIdentityPlatformClient(
           failure(
             400,
             "PASSWORD_REQUIREMENTS",
-            "Choose a stronger password with at least 12 characters, including uppercase and lowercase letters, a number and a symbol.",
+            "Use 12 or more characters with uppercase and lowercase letters, a number and a symbol.",
           );
         if (["INVALID_EMAIL", "MISSING_EMAIL"].includes(code))
           failure(400, "INVALID_EMAIL", "Enter a valid email address.");
@@ -206,7 +206,7 @@ export function createIdentityPlatformClient(
           failure(
             400,
             "PASSWORD_REQUIRED",
-            "Enter a password and repeat it in the confirmation field.",
+            "Enter and confirm your password.",
           );
         if (
           [
@@ -219,13 +219,13 @@ export function createIdentityPlatformClient(
           failure(
             503,
             "SIGN_UP_DISABLED",
-            "Email/password account creation is disabled. Use Google sign-in or contact the operator.",
+            "Email signup is unavailable. Use Google or contact support.",
           );
         if (code === "QUOTA_EXCEEDED")
           failure(
             429,
             "SIGN_UP_LIMIT_REACHED",
-            "The account creation limit has been reached. Please try again later or contact the operator.",
+            "Too many signup attempts. Try again later.",
           );
         if (
           [
@@ -237,20 +237,20 @@ export function createIdentityPlatformClient(
           failure(
             400,
             "SIGN_UP_VERIFICATION_FAILED",
-            "The signup security check failed. Refresh the page and try again. If it keeps failing, contact the operator.",
+            "Signup security check failed. Refresh and try again.",
           );
         if (code === "USER_DISABLED")
           failure(
             403,
             "ACCOUNT_DISABLED",
-            "This account has been disabled. Contact the operator.",
+            "Account disabled. Contact support.",
           );
       }
       if (code === "PASSWORD_LOGIN_DISABLED")
         failure(
           503,
           "PASSWORD_LOGIN_DISABLED",
-          "Email/password sign-in is not enabled yet. Use Google sign-in or contact the operator.",
+          "Password sign-in is unavailable. Use Google or contact support.",
         );
       if (
         [
@@ -266,19 +266,19 @@ export function createIdentityPlatformClient(
           503,
           "AUTH_UNAVAILABLE",
           method === "signUp"
-            ? "Account creation is temporarily unavailable because the sign-in service is not ready. Contact the operator or try again later."
+            ? "Signup is unavailable. Try again later or contact support."
             : "Sign-in is temporarily unavailable. Please try again.",
         );
       if (method === "signUp")
         failure(
           400,
           "SIGN_UP_FAILED",
-          "The sign-in service rejected account creation without a recognized reason. Try again or contact the operator with the reference below.",
+          "Could not create your account. Try again or contact support with the reference below.",
         );
       failure(
         401,
         "SIGN_IN_FAILED",
-        "Sign-in could not be completed. Check your details or use password reset.",
+        "Check your sign-in details or reset your password.",
       );
     }
     return result;
@@ -288,7 +288,7 @@ export function createIdentityPlatformClient(
       throw new HttpError(
         403,
         "IDENTITY_MFA_REQUIRED",
-        "This account requires its configured second factor. Contact the operator to complete sign-in.",
+        "This account requires two-step verification. Contact support.",
       );
     if (
       typeof value.idToken !== "string" ||

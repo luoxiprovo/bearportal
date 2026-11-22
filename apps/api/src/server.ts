@@ -210,7 +210,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
 
   registerDevelopmentLogin(app, Boolean(deps.devJwtPrivateKeyPem),undefined,deps.identityPlatform?()=>renderOperatorAuth():undefined);
 
-  app.get("/register", async (_request, reply) => sendHome(reply, 200));
+  app.get("/register", async (_request, reply) => sendHome(reply, 200, {authMode:"signup"}));
   app.get("/operator/security",async(_request,reply)=>reply.type("text/html; charset=utf-8").header("cache-control","no-store").header("referrer-policy","no-referrer").send(renderOperatorAuth(true)));
   app.get("/login", async (_request, reply) => sendHome(reply, 200, {authMode:"signin"}));
 
@@ -224,7 +224,7 @@ export async function buildServer(deps: ApiDeps, logDestination?: NodeJS.Writabl
     }
     if (organization.length > 120) return again(400, "Enter an organization name.");
     if (!deps.devJwtPrivateKeyPem || deps.identityPlatform) {
-      return again(403, "This server registers accounts through Identity Platform. Browser registration is available on the development server.");
+      return again(403, "Use the sign-in form to create an account.");
     }
     try {
       consumeLimit(rateHits, `register:${email}`, "register", 10, 60 * 60 * 1000);

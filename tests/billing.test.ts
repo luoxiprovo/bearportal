@@ -269,7 +269,7 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
   };
   try {
     const page = await request("GET", "/portal");
-    assert.match(page.body, /First month free/);
+    assert.match(page.body, /First calendar month free/);
     assert.doesNotMatch(page.body, /action="\/portal\/domain"/);
     assert.doesNotMatch(page.body, /action="\/portal\/onboarding"/);
     const denied = await request("POST", "/v1/deployments", {
@@ -566,7 +566,7 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
     const operator = await request("GET", "/operator", undefined, adminToken);
     assert.match(operator.body, /manual cleanup required/);
     assert.match(operator.body, /billing@example.org/);
-    assert.match(operator.body, /Manually stop/);
+    assert.match(operator.body, /Stop the mail service/);
     assert.match(operator.body, /8\.8\.4\.4/);
     assert.deepEqual(
       await query(`SELECT state FROM servers WHERE id=${q(assignedServer)}`),

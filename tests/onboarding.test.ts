@@ -215,7 +215,7 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     assert.deepEqual(await query("SELECT count(*) FROM server_assignments WHERE released_at IS NULL"),[["0"]],"Registration must not reserve a server");
     assert.deepEqual(await query("SELECT count(*) FROM relay_assignments WHERE released_at IS NULL"),[["0"]],"Registration must not reserve Brevo");
     const welcome = await app.inject({ url: "/portal", headers: { cookie } });
-    assert.ok(welcome.body.includes("What’s your domain?"));
+    assert.ok(welcome.body.includes("Add your domain"));
     const saved = await form(
       "/portal/domain",
       { csrf: "1", onboarding: "1", domain: "company.site" },
@@ -326,7 +326,7 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     );
     const waiting = await app.inject({ url: "/portal", headers: { cookie } });
     assert.ok(waiting.body.includes("A server and a Brevo account are currently unavailable."));
-    assert.ok(waiting.body.includes("You don’t need to submit your DNS credentials again"));
+    assert.ok(waiting.body.includes("continue automatically when capacity is available"));
     assert.equal(waiting.body.includes(credentials), false);
     await app.close();
     app = await buildServer(deps);
@@ -524,11 +524,11 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
       "HTTPS readiness does not establish mail delivery",
     );
     const portal = await app.inject({ url: "/portal", headers: { cookie } });
-    assert.ok(portal.body.includes("Open Bearmail"));
+    assert.ok(portal.body.includes("Open webmail"));
     assert.ok(portal.body.includes("https://bearmail.company.site"));
     assert.ok(portal.body.includes("https://mail.company.site/"));
     assert.ok(portal.body.includes("Show administrator login"));
-    assert.ok(portal.body.includes("full mailbox address"));
+    assert.ok(portal.body.includes("not your BearPortal login"));
     assert.equal(portal.body.includes(installedAdminPassword), false);
     const noCsrfReveal = await app.inject({
       method: "POST",
@@ -623,7 +623,7 @@ test("email onboarding persists consent, waits for capacity, verifies the provid
     });
     assert.equal(interruptedPage.body.includes('name="deployConsent"'), false);
     assert.equal(interruptedPage.body.includes('name="dnsToken"'), false);
-    assert.ok(interruptedPage.body.includes("Our team"));
+    assert.ok(interruptedPage.body.includes("An operator"));
     const unsafeRetry = await form(
       "/portal/onboarding",
       { csrf: "1", deployConsent: "1" },

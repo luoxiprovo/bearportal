@@ -214,19 +214,19 @@ test("Identity Platform REST client validates Google nonce/audience, brokers pas
   providerError='PASSWORD_LOGIN_DISABLED';
   await assert.rejects(client.password('person@example.org','password-canary',false),error=>error instanceof HttpError&&error.status===503&&error.code==='PASSWORD_LOGIN_DISABLED');
   for (const [providerCode, expectedCode, message] of [
-    ["EMAIL_EXISTS", "ACCOUNT_EXISTS", /email already exists/],
-    ["EMAIL_ALREADY_EXISTS", "ACCOUNT_EXISTS", /Continue with Google/],
-    ["WEAK_PASSWORD : password-canary", "PASSWORD_REQUIREMENTS", /stronger password/],
-    ["PASSWORD_DOES_NOT_MEET_REQUIREMENTS", "PASSWORD_REQUIREMENTS", /stronger password/],
+    ["EMAIL_EXISTS", "ACCOUNT_EXISTS", /already has an account/],
+    ["EMAIL_ALREADY_EXISTS", "ACCOUNT_EXISTS", /Sign in with Google/],
+    ["WEAK_PASSWORD : password-canary", "PASSWORD_REQUIREMENTS", /12 or more characters/],
+    ["PASSWORD_DOES_NOT_MEET_REQUIREMENTS", "PASSWORD_REQUIREMENTS", /12 or more characters/],
     ["INVALID_EMAIL", "INVALID_EMAIL", /valid email/],
-    ["ADMIN_ONLY_OPERATION", "SIGN_UP_DISABLED", /account creation is disabled/],
-    ["OPERATION_NOT_ALLOWED", "SIGN_UP_DISABLED", /account creation is disabled/],
-    ["PASSWORD_LOGIN_DISABLED", "SIGN_UP_DISABLED", /account creation is disabled/],
-    ["QUOTA_EXCEEDED", "SIGN_UP_LIMIT_REACHED", /limit has been reached/],
+    ["ADMIN_ONLY_OPERATION", "SIGN_UP_DISABLED", /Email signup is unavailable/],
+    ["OPERATION_NOT_ALLOWED", "SIGN_UP_DISABLED", /Email signup is unavailable/],
+    ["PASSWORD_LOGIN_DISABLED", "SIGN_UP_DISABLED", /Email signup is unavailable/],
+    ["QUOTA_EXCEEDED", "SIGN_UP_LIMIT_REACHED", /Too many signup attempts/],
     ["CAPTCHA_CHECK_FAILED", "SIGN_UP_VERIFICATION_FAILED", /security check failed/],
     ["USER_DISABLED", "ACCOUNT_DISABLED", /disabled/],
-    ["UNKNOWN : password-canary", "SIGN_UP_FAILED", /without a recognized reason/],
-    ["WEAK_PASSWORD: password-canary", "PASSWORD_REQUIREMENTS", /stronger password/],
+    ["UNKNOWN : password-canary", "SIGN_UP_FAILED", /Could not create your account/],
+    ["WEAK_PASSWORD: password-canary", "PASSWORD_REQUIREMENTS", /12 or more characters/],
   ] as const) {
     providerError = providerCode;
     await assert.rejects(client.password("person@example.org", "password-canary", true), error =>

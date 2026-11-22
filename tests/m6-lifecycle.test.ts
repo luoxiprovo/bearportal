@@ -471,9 +471,9 @@ describe("M6 lifecycle policy", () => {
       cloudVerified: false,
     });
     assertHonestPage(customer);
-    assert.ok(customer.includes("Your account & service details"));
+    assert.ok(customer.includes("Account and service details"));
     assert.ok(customer.includes("webmail.mail-m6.alpha-bearportal.com"));
-    assert.ok(customer.includes("separate"));
+    assert.ok(customer.includes("Use your mailbox address and password"));
 
 
 
@@ -536,14 +536,14 @@ describe("M6 lifecycle policy", () => {
     assert.ok(operator.includes("SMTP key"));
     assert.ok(operator.includes("API key"));
     assert.ok(operator.includes("Daily allowance"));
-    assert.ok(operator.includes("Cloud servers and provider accounts are managed separately"));
+    assert.ok(operator.includes("Cloud resources are unchanged"));
     const accountResult = renderBrevoAccountResult({
       loginEmail: "relay@recovery-bearportal.com",
       stored: true,
       state: "inactive",
     });
     assertHonestPage(accountResult);
-    assert.ok(accountResult.includes("This page did not call Brevo."));
+    assert.ok(accountResult.includes("Domain verification runs during customer setup."));
     assert.ok(accountResult.includes("does not publish DNS"));
     assert.equal(accountResult.includes('name="domain"'), false);
     const brevoResult = renderBrevoDomainResult({
@@ -561,7 +561,7 @@ describe("M6 lifecycle policy", () => {
 
 
 
-    assert.ok(operator.includes("binaries executed false"));
+    assert.ok(operator.includes("Upgrade plans do not run upgrades or roll back data"));
     const homePage = renderHome();
     assertHonestPage(homePage);
     assert.ok(homePage.includes("Your domain."));
@@ -574,7 +574,7 @@ describe("M6 lifecycle policy", () => {
     const identityHome = renderHome({ mode: "identity" });
     assert.equal(identityHome.includes('action="/register"'), false);
     assert.equal(identityHome.includes('name="invitation"'), false);
-    assert.ok(identityHome.includes("sign-in provider"));
+    assert.ok(identityHome.includes("organization’s verified account"));
     assert.ok(identityHome.includes("Your domain."));
     assertHonestPage(identityHome);
     const failedHome = renderHome({ error: "Enter your email address.", email: "owner@recovery-bearportal.com" });
@@ -600,7 +600,7 @@ describe("M6 lifecycle policy", () => {
       allocationState: "waiting_for_server",
     });
     assertHonestPage(waiting);
-    assert.ok(waiting.includes("Let’s make it yours."));
+    assert.ok(waiting.includes("Add your domain"));
     assert.ok(waiting.includes("your domain"));
     assert.ok(waiting.includes('action="/portal/domain"'));
     assert.equal(waiting.includes('name="apiKey"'), false);
@@ -902,7 +902,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     assert.ok(customerPage.text.includes(replacementIp));
     assert.equal(customerPage.text.includes(assigned.publicIpv4), false);
     assert.ok(customerPage.text.includes(`bearmail.${DOMAIN}`));
-    assert.ok(customerPage.text.includes("Your account & service details"));
+    assert.ok(customerPage.text.includes("Account and service details"));
     assert.ok(customerPage.text.includes("Connection settings"));
     assert.ok(customerPage.text.includes("Live mail verified"));
     assert.ok(customerPage.text.includes("beta"));
@@ -939,7 +939,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     assert.ok(home.text.includes("Your domain."));
     assert.ok(home.text.includes('id="register"'));
     assert.ok(home.text.includes("dedicated"));
-    assert.ok(home.text.includes("sign-in provider"));
+    assert.ok(home.text.includes("organization’s verified account"));
     assert.equal(home.text.includes('action="/register"'), false);
   });
 
@@ -996,8 +996,8 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
       const portal = await fetch(`${origin}/portal`, { headers: { cookie: setCookie.split(";")[0] ?? "" } });
       assert.equal(portal.status, 200);
       const portalText = await portal.text();
-      assert.ok(portalText.includes("Let’s make it yours."));
-      assert.ok(portalText.includes("Allocated during setup"));
+      assert.ok(portalText.includes("Add your domain"));
+      assert.ok(portalText.includes('action="/portal/domain"'));
       assert.ok(portalText.includes("operator-reported"));
       assert.ok(portalText.includes('<script src="/assets/customer-session.js" defer></script>'));
       assert.equal(portalText.includes("<script>"), false);
@@ -1484,7 +1484,7 @@ describe("M6 lifecycle API", { concurrency: false }, () => {
     const stored = await postForm("/operator/brevo-account", await adminToken(), accountFields);
     assert.equal(stored.status, 200);
     assertHonestPage(stored.text);
-    assert.ok(stored.text.includes("This page did not call Brevo."));
+    assert.ok(stored.text.includes("Domain verification runs during customer setup."));
     assert.ok(stored.text.includes("does not publish DNS"));
     assert.ok(stored.text.includes("state is inactive"));
     assert.equal(stored.text.includes("Brevo reports"), false);

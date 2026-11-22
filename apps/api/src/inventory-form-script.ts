@@ -17,8 +17,8 @@ export const INVENTORY_FORM_SCRIPT = `
       try{
         var response=await fetch(form.action,{method:'POST',headers:{accept:'application/json'},body:new URLSearchParams(new FormData(form))});
         var result=await response.json();
-        if(!response.ok){var failure=new Error(result.error&&result.error.message||'The inventory change could not be saved.');failure.authUrl=response.status===401?'/operator/login':result.error&&result.error.code==='MFA_REQUIRED'?'/operator/security':null;throw failure}
-        if(!result.redirect)throw new Error('The server did not return an inventory page. Refresh to check whether your change was saved.');
+        if(!response.ok){var failure=new Error(result.error&&result.error.message||'Could not save changes.');failure.authUrl=response.status===401?'/operator/login':result.error&&result.error.code==='MFA_REQUIRED'?'/operator/security':null;throw failure}
+        if(!result.redirect)throw new Error('Refresh to check whether your changes were saved.');
         var destination=new URL(result.redirect,location.href);
         var dialog=form.closest('dialog');
         if(dialog)dialog.close();
@@ -29,7 +29,7 @@ export const INVENTORY_FORM_SCRIPT = `
         }
         navigating=true;
       }catch(failure){
-        if(error){error.textContent=failure.message||'Could not reach BearPortal. Please try again.';error.hidden=false;if(failure.authUrl){var authLink=document.createElement('a');authLink.href=failure.authUrl;authLink.target='_blank';authLink.rel='noopener noreferrer';authLink.textContent=' Confirm operator access in a new tab, then retry.';error.appendChild(authLink)}error.focus()}
+        if(error){error.textContent=failure.message||'Could not reach BearPortal. Try again.';error.hidden=false;if(failure.authUrl){var authLink=document.createElement('a');authLink.href=failure.authUrl;authLink.target='_blank';authLink.rel='noopener noreferrer';authLink.textContent=' Verify operator access, then retry.';error.appendChild(authLink)}error.focus()}
       }finally{
         if(!navigating){pending=false;form.removeAttribute('aria-busy');if(submit){submit.disabled=false;submit.textContent=originalLabel}}
       }

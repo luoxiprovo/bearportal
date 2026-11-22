@@ -17,27 +17,27 @@ export function setupFailureCode(error: unknown): string {
 
 export function setupErrorMessage(code: string): string {
   const messages: Record<string, string> = {
-    DOMAIN_ALREADY_IN_USE: 'This domain already has a setup or installation under another account. An operator must review its ownership before setup can continue.',
-    DOMAIN_DNS_NOT_FOUND: 'No DNS nameservers were found for the submitted domain. Check the domain spelling and registration; we’ll retry automatically.',
-    MAILBOX_ADDRESS_CONFLICT: 'This domain’s mailbox address is already in use by an existing setup. Installation is paused. Use a different domain or ask an operator to review the existing domain assignment.',
-    DNS_PROPAGATION: 'Brevo has not confirmed the domain verification records yet. Waiting for DNS; we’ll check again automatically.',
-    DNS_CREDENTIAL_REJECTED: 'The domain provider rejected the saved credential. Check its validity and DNS permissions.',
-    DNS_ZONE_NOT_FOUND: 'The domain provider could not find this domain in the connected account. Check the domain spelling and account access.',
-    DNS_PROVIDER_UNREACHABLE: 'The domain provider could not be reached. We’ll retry automatically.',
-    DNS_RECORD_REJECTED: 'The domain provider rejected a DNS record update. We’ll retry; persistent failures need operator review.',
-    DNS_CREDENTIAL_REQUIRED: 'No usable domain-provider credential was found. Reconnect your provider.',
-    DNS_PROVIDER_CHANGED: 'The domain’s nameservers do not match the saved provider connection. Check the domain spelling and provider.',
-    PROVIDER_RETRY: 'A provider or setup preparation request failed. We’ll retry automatically. No more specific cause was recorded.',
-    SETUP_REVIEW_REQUIRED: 'The setup worker failed or exhausted its retry limit. Setup is paused for operator review; no more specific cause was recorded.',
-    OUTCOME_UNKNOWN: 'Installation was interrupted and its outcome is unknown. An operator must check the server before it can continue.',
+    DOMAIN_ALREADY_IN_USE: 'This domain is in use by another account. Ask an operator to review ownership.',
+    DOMAIN_DNS_NOT_FOUND: 'No nameservers found. Check the domain spelling and registration.',
+    MAILBOX_ADDRESS_CONFLICT: 'This domain’s mailbox address is already in use. Ask an operator to review the assignment.',
+    DNS_PROPAGATION: 'Waiting for DNS verification. We’ll check again automatically.',
+    DNS_CREDENTIAL_REJECTED: 'DNS credential rejected. Check the token and its DNS permissions.',
+    DNS_ZONE_NOT_FOUND: 'Domain not found in this DNS account. Check the spelling and account access.',
+    DNS_PROVIDER_UNREACHABLE: 'DNS provider unavailable. We’ll retry automatically.',
+    DNS_RECORD_REJECTED: 'DNS update rejected. We’ll retry automatically.',
+    DNS_CREDENTIAL_REQUIRED: 'Reconnect your DNS provider.',
+    DNS_PROVIDER_CHANGED: 'DNS provider changed. Reconnect your domain.',
+    PROVIDER_RETRY: 'Setup could not continue. We’ll retry automatically.',
+    SETUP_REVIEW_REQUIRED: 'Setup is paused for operator review.',
+    OUTCOME_UNKNOWN: 'Installation was interrupted. An operator must check the server before retrying.',
     EMAIL_UNVERIFIED: 'The BearPortal account email is not verified.',
-    ACCOUNT_REVIEW_REQUIRED: 'The account is not eligible to continue setup. Operator review is required.',
-    RELAY_REVIEW_REQUIRED: 'The allocated mail-service account is disabled. Operator review is required.',
-    BREVO_AUTH_UNAVAILABLE: 'Brevo domain authentication is unavailable in the installation service.',
+    ACCOUNT_REVIEW_REQUIRED: 'An operator must review this account before setup can continue.',
+    RELAY_REVIEW_REQUIRED: 'Your mail-service account is disabled. Operator review is needed.',
+    BREVO_AUTH_UNAVAILABLE: 'Domain authentication is unavailable. Contact support.',
     INSTALLER_UNAVAILABLE: 'The installation service is unavailable. We’ll retry automatically.',
-    INSTALLER_STORAGE_UNAVAILABLE: 'The installation service cannot access its working storage. We’ll retry automatically.',
-    TLS_PENDING: 'Bearmail is installed; HTTPS certificate checks are still pending.',
+    INSTALLER_STORAGE_UNAVAILABLE: 'Installation storage is unavailable. We’ll retry automatically.',
+    TLS_PENDING: 'Bearmail is installed. Checking HTTPS certificates.',
   };
   if (/^DATABASE_[0-9A-Z]{5}$/.test(code)) return `A database operation failed (SQLSTATE ${code.slice(9)}). Setup is paused for operator review.`;
-  return messages[code] ?? 'The backend reported a setup failure. Operator review is required; see the error code below.';
+  return messages[code] ?? 'Setup needs operator review. See the error code below.';
 }

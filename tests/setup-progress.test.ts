@@ -24,6 +24,7 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
     assert.equal(setupProgress(view).current, current);
     assert.equal(setupProgress(view).complete, complete);
     const html = renderCustomerPortal(view);
+    if (complete) { assert.doesNotMatch(html, /aria-label="Setup progress"/); continue; }
     assert.equal((html.slice(html.indexOf('<ol class="milestones"')).split("</ol>")[0].match(/aria-current="step"/g) ?? []).length, complete ? 0 : 1);
     assert.ok(html.includes('aria-label="Setup progress"'));
   }
@@ -35,7 +36,7 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
   assert.match(executing, /class="milestone-number working-spinner"/);
   assert.match(executing, /Step 2 of 2/);
   const failed = renderCustomerPortal({ ...connected, onboardingState: "attention", onboardingError: "DNS_ZONE_NOT_FOUND" });
-  assert.match(failed, /could not find this domain/);
+  assert.match(failed, /Domain not found/);
   assert.match(failed, /Error code: <code>DNS_ZONE_NOT_FOUND/);
   assert.doesNotMatch(failed, /class="milestone-number working-spinner"/);
   assert.doesNotMatch(failed, /Your account<\/strong>|Provider connection<\/strong>/);
@@ -43,7 +44,7 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
   assert.match(pending, /location.reload/);
   assert.doesNotMatch(pending, /Your setup is complete/);
   const ready = renderCustomerPortal({ ...connected, onboardingState: "installed", installerStatus: "succeeded" });
-  assert.match(ready, /Mail delivery and mailbox access still need verification/);
+  assert.match(ready, /test sending and receiving/);
   assert.doesNotMatch(ready, /location.reload/);
 });
 
@@ -56,11 +57,12 @@ test("Brevo verification animates during work and automatic waits while preservi
     { onboardingState: "queued", onboardingError: "BREVO_UNAVAILABLE" },
   ] as const) {
     const html = renderCustomerPortal({ ...connected, ...state });
-    assert.match(html, /Step 1 of 2 · Verifying Brevo domain/);
+    assert.match(html, /Step 1 of 2/);
     assert.match(html, /class="milestone-number working-spinner" aria-hidden="true"><\/span><div><strong>Verifying Brevo domain/);
     if (state.onboardingState === "queued" && !state.onboardingError) assert.match(html, /<small>Working<\/small>/);
-    else assert.match(html, /class="waiting-status">Waiting for DNS propagate/);
-    assert.match(html, /class="setup-timing">The whole process, including domain records taking effect, may take about 7 minutes/);
+    else if (state.onboardingError === "DNS_PROPAGATION") assert.match(html, /class="waiting-status">Waiting for DNS/);
+    else assert.match(html, /class="waiting-status">Retrying/);
+    assert.match(html, /class="setup-timing">DNS updates can take minutes to hours/);
   }
   const paused = renderCustomerPortal({ ...connected, onboardingState: "attention", onboardingError: "DNS_ZONE_NOT_FOUND" });
   assert.doesNotMatch(paused, /class="milestone-number working-spinner"/);
@@ -77,20 +79,20 @@ test("customer journey shows the saved next action and keeps active billing belo
   assert.match(provider, /id="next-step-title">Connect your DNS provider/);
   assert.match(provider, /action="\/portal\/dns-credential"/);
   const unknownProvider = renderCustomerPortal({ ...base, billing, domainName: "company.com", detectedNameservers: ["ns.example.net"] });
-  assert.match(unknownProvider, /id="next-step-title">Check your DNS provider/);
+  assert.match(unknownProvider, /id="next-step-title">Connect your DNS provider/);
   assert.match(unknownProvider, /action="\/portal\/domain"/);
   assert.doesNotMatch(unknownProvider, /action="\/portal\/dns-credential"/);
   const running = renderCustomerPortal({ ...base, billing, domainName: "company.com", dnsState: "stored", onboardingState: "installing" });
-  assert.match(running, /Setup is in progress — no action needed/);
+  assert.match(running, /Setting up your Bearmail/);
   assert.doesNotMatch(running, /action="\/portal\/onboarding"/);
   const reconnect = renderCustomerPortal({ ...base, billing, domainName: "company.com", dnsState: "stored", detectedProvider: "namecom", onboardingState: "attention", onboardingError: "DNS_CREDENTIAL_REQUIRED" });
   assert.match(reconnect, /id="next-step-title">Reconnect your DNS provider/);
   assert.match(reconnect, /action="\/portal\/dns-credential"/);
   const ready = renderCustomerPortal({ ...base, billing, domainName: "company.com", dnsState: "stored", onboardingState: "installed", installerStatus: "succeeded" });
   assert.match(ready, /id="next-step-title">Create your first mailbox/);
-  assert.match(ready, /Create a mailbox and set its password/);
+  assert.match(ready, /Create a mailbox and password/);
   const unpaid = renderCustomerPortal({ ...base, billing: { ...billing, entitled: false, status: "none", trialAvailable: true } });
-  assert.match(unpaid, /id="next-step-title">Start your subscription/);
+  assert.match(unpaid, /id="next-step-title">Start with your subscription/);
   assert.doesNotMatch(unpaid, /action="\/portal\/domain"/);
 });
 
@@ -105,7 +107,7 @@ test("capacity waits show saved credentials and exact shortages without installa
     assert.match(html, /Waiting for setup capacity/);
     assert.ok(html.includes(message));
     assert.match(html, /Installation has not started/);
-    assert.match(html, /Your DNS credentials and setup permission are saved/);
+    assert.match(html, /Domain connection saved/);
     assert.match(html, /continue automatically/);
     assert.match(html, /location.reload/);
     assert.doesNotMatch(html, /Verifying Brevo domain|role="progressbar"|class="milestone-number working-spinner"|about 7 minutes|Setup is in progress/);

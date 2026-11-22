@@ -35,7 +35,7 @@ export function registerBrowserAuth(
       throw new HttpError(
         503,
         "AUTH_NOT_CONFIGURED",
-        "Account sign-in is not configured yet. Contact the operator.",
+        "Sign-in is unavailable. Contact support.",
       );
     return { config, client };
   };
@@ -157,12 +157,12 @@ export function registerBrowserAuth(
       .strict()
       .parse(request.body);
     if (body.password !== body.confirmPassword)
-      throw new HttpError(400, "PASSWORD_MISMATCH", "Passwords do not match. Enter the same password in both fields.");
+      throw new HttpError(400, "PASSWORD_MISMATCH", "Passwords do not match.");
     const duplicate = await ctx.withSystem("inventory_worker", async db => {
       await ctx.setActor(db, "platform_administrator");
       return (await db.query("SELECT id FROM users WHERE lower(verified_email)=$1 LIMIT 1", [body.email.toLowerCase()])).rows.length > 0;
     });
-    if (duplicate) throw new HttpError(409, "ACCOUNT_EXISTS", "An account with this email already exists. Sign in instead or use password reset.");
+    if (duplicate) throw new HttpError(409, "ACCOUNT_EXISTS", "This email already has an account. Sign in or reset your password.");
     let tokens: IdentityTokens;
     try {
       tokens = await client.password(body.email.toLowerCase(), body.password, true);
@@ -261,7 +261,7 @@ export function registerBrowserAuth(
     return {
       sent: true,
       message:
-        "If an account exists for this address, a password reset email is on its way.",
+        "If this email has an account, we’ll send a password reset link.",
     };
   });
   app.post("/auth/refresh", async (request, reply) => {

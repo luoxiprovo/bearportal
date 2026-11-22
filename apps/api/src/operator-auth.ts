@@ -68,7 +68,7 @@ export function registerOperatorAuth(
         throw new HttpError(
           403,
           "OPERATOR_REQUIRED",
-          "This account is not authorized as an operator. Sign out and use your authorized account.",
+          "Sign in with an authorized operator account.",
         );
       if (
         row.operator_mfa_reset_at &&
@@ -288,7 +288,7 @@ export function registerOperatorAuth(
           error:
             failures >= 5
               ? "Too many incorrect codes. Wait 5 minutes before trying again."
-              : "That code is invalid or has already been used. Wait for the next authenticator code, or use an unused recovery code.",
+              : "Invalid or used code. Enter the next authenticator code or an unused recovery code.",
           status: failures >= 5 ? 429 : 400,
         };
       }

@@ -13,5 +13,5 @@ test('setup failures retain safe provider and database causes without exposing r
   const safe=setupFailureCode(new Error(secret));
   assert.equal(safe,'PROVIDER_RETRY');
   assert.equal(setupErrorMessage(safe).includes(secret),false);
-  assert.match(setupErrorMessage('SETUP_REVIEW_REQUIRED'), /no more specific cause was recorded/);
+  assert.match(setupErrorMessage('SETUP_REVIEW_REQUIRED'), /paused for operator review/);
 });
