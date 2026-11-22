@@ -89,6 +89,8 @@ sudo python3 scripts/migrate-import.py --from luoxi23vr@136.86.167.25 --resume
 
 The importer checkpoints its progress and refuses to overwrite an unrelated database or restore again over an activated target. An interrupted transfer can be retried. An incomplete archive extraction is discarded and repeated. Do not delete checkpoint files to force a new import.
 
+While the checkpoint is still `preparing` (before the source export), resume can fast-forward the destination checkout to the current verified source snapshot and update the checkpoint's commit. It preserves untracked files and refuses tracked local changes or divergent history. Once preparation has completed, keep the source version unchanged until migration finishes.
+
 Before the old proxy has switched, an abandoned migration can be rolled back **only after you stop the destination API and ensure it cannot restart**. On the old server:
 
 ```bash

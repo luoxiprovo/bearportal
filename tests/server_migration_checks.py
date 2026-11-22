@@ -186,6 +186,31 @@ class Database(Base):
             for name in (target,source):m.sql('DROP DATABASE IF EXISTS '+m.identifier(name)+' WITH (FORCE);')
 
 class ImportFlow(Base):
+    def test_preparing_checkout_fast_forwards_but_preserves_local_changes(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('migration_import',Path(m.__file__).with_name('migrate-import.py'))
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        source=self.root/'source';source.mkdir()
+        def git(root,*args):
+            return subprocess.run(['git',*args],cwd=root,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True).stdout.decode().strip()
+        git(source,'init','-b','main')
+        def commit(text):
+            (source/'app.txt').write_text(text);git(source,'add','app.txt')
+            git(source,'-c','user.name=Migration Test','-c','user.email=test@example.org','commit','-m',text)
+            return git(source,'rev-parse','HEAD')
+        commit('old');target=self.root/'target'
+        git(self.root,'clone',str(source),str(target))
+        current=commit('new');bundle=self.root/'source.bundle'
+        m.create_git_bundle(source,bundle,'main')
+        (target/'private.env').write_text('preserve')
+        module.reconcile_preparing_checkout(target,bundle,current)
+        self.assertEqual(git(target,'rev-parse','HEAD'),current)
+        self.assertEqual((target/'private.env').read_text(),'preserve')
+        (target/'app.txt').write_text('local changes')
+        with self.assertRaisesRegex(m.MigrationError,'tracked code changes'):
+            module.reconcile_preparing_checkout(target,bundle,current)
+        self.assertEqual((target/'app.txt').read_text(),'local changes')
+
     def fixture(self):
         import importlib.util
         spec=importlib.util.spec_from_file_location('migration_import',Path(m.__file__).with_name('migrate-import.py'))

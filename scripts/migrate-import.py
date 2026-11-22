@@ -20,6 +20,20 @@ def ownership(database,migration_id):
     return bool(result and result[0]['description']=='bearportal-migration:'+migration_id)
 
 
+def reconcile_preparing_checkout(root,bundle,commit):
+    # Only called before export, for a checkout owned by this checkpoint.
+    # Root needs to read the private bundle; trust only this exact repository.
+    def git(*flags):
+        return m.run(['env','git','-c','safe.directory='+str(root),*flags],cwd=root,label='Preparing application snapshot')
+    if git('status','--porcelain','--untracked-files=no').strip():
+        raise m.MigrationError('Destination has tracked code changes. Preserve and resolve them before resuming.')
+    if git('rev-parse','HEAD').decode().strip()!=commit:
+        git('fetch',str(bundle))
+        git('merge','--ff-only',commit)
+    if git('rev-parse','HEAD').decode().strip()!=commit:
+        raise m.MigrationError('Destination code does not match the source snapshot.')
+
+
 def wait_local(port,maintenance):
     import urllib.request,urllib.error
     for _ in range(60):
@@ -113,8 +127,8 @@ def main():
             root.parent.mkdir(parents=True,exist_ok=True)
             m.run(['git','clone','--branch',meta['branch'],str(unpacked/'code.bundle'),root],label='Pinned application restore')
             if meta.get('git_remote'): m.run(['git','remote','set-url','origin',meta['git_remote']],cwd=root)
-        if m.run(['git','rev-parse','HEAD'],cwd=root).decode().strip()!=meta['commit']:
-            raise m.MigrationError('Destination code does not match the source snapshot.')
+        reconcile_preparing_checkout(root,unpacked/'code.bundle',meta['commit'])
+        state['source_commit']=meta['commit'];m.write_json(state_path,state)
         try: pwd.getpwnam(args.user)
         except KeyError: m.run(['useradd','--system','--user-group','--home-dir','/var/lib/bearportal','--no-create-home','--shell','/usr/sbin/nologin',args.user],label='Service user creation')
         m.private_dir('/var/lib/bearportal');m.chown_tree('/var/lib/bearportal',args.user);m.chown_tree(root,args.user)
