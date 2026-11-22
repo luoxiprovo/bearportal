@@ -516,6 +516,10 @@ def ensure_target_tools(stage,meta):
     arch={'x86_64':'x64','aarch64':'arm64'}.get(platform.machine())
     if not arch: raise MigrationError('Unsupported CPU architecture.')
     version=meta['node_version']; prefix=Path('/opt/bearportal-runtime')/('node-'+version+'-'+arch)
+    # The importer uses umask 077 for secrets, but the service user must be
+    # able to traverse the runtime directory. Repair it on resume as well.
+    prefix.parent.mkdir(parents=True,exist_ok=True)
+    prefix.parent.chmod(0o755)
     if not (prefix/'bin/node').is_file():
         archive_name='node-'+version+'-linux-'+arch+'.tar.xz'
         archive=Path(stage)/archive_name;sums=Path(stage)/'SHASUMS256.txt'
@@ -523,7 +527,6 @@ def ensure_target_tools(stage,meta):
         download('https://nodejs.org/dist/'+version+'/SHASUMS256.txt',sums)
         expected=next((line.split()[0] for line in sums.read_text().splitlines() if line.split()[-1]==archive_name),None)
         if not expected or file_hash(archive)!=expected: raise MigrationError('Node.js download checksum did not match.')
-        prefix.parent.mkdir(parents=True,exist_ok=True)
         unpacked=Path(stage)/'node'
         if unpacked.exists(): shutil.rmtree(unpacked)
         unpacked.mkdir()

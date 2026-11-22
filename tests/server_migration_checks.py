@@ -27,6 +27,30 @@ class Base(unittest.TestCase):
         return stage
 
 class Files(Base):
+    def test_runtime_parent_is_accessible_when_resuming_private_install(self):
+        # Exercise prerequisite setup without apt, network or host mutations.
+        sandbox=self.root/'host'
+        def host_path(value):
+            path=Path(value)
+            return path if path.is_relative_to(self.root) else sandbox/str(value).lstrip('/')
+        release=host_path('/etc/os-release');release.parent.mkdir(parents=True)
+        release.write_text('ID=debian\nVERSION_ID=13\n')
+        runtime=host_path('/opt/bearportal-runtime/node-v22.0.0-x64')
+        (runtime/'bin').mkdir(parents=True)
+        (runtime/'bin/node').touch()
+        runtime.parent.chmod(0o700)
+        key=host_path('/usr/share/keyrings/caddy-stable-archive-keyring.gpg')
+        key.parent.mkdir(parents=True);key.touch()
+        stage=self.root/'stage';stage.mkdir(mode=0o700)
+        def download(url,path):Path(path).write_text('fixture')
+        old_umask=os.umask(0o077)
+        try:
+            with patch.object(m,'Path',side_effect=host_path),patch.object(m,'run'),patch.object(m,'download',side_effect=download),patch.object(m,'atomic_write'),patch('platform.machine',return_value='x86_64'):
+                m.ensure_target_tools(stage,dict(node_version='v22.0.0',pnpm='pnpm@10.15.0'))
+            self.assertEqual(runtime.parent.stat().st_mode&0o777,0o755)
+            self.assertEqual(stage.stat().st_mode&0o777,0o700)
+        finally:os.umask(old_umask)
+
     def test_bundle_roundtrip_and_corruption(self):
         stage=self.stage();bundle=self.root/'export.tar.gz';m.pack(stage,bundle)
         result=m.unpack(bundle,self.root/'restored')
