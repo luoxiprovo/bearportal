@@ -536,6 +536,10 @@ def ensure_target_tools(stage,meta):
             if not path.is_symlink(): path.chmod(0o755 if path.is_dir() or path.stat().st_mode&0o111 else 0o644)
     command_env={**os.environ,'PATH':str(prefix/'bin')+':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}
     run([prefix/'bin/npm','install','--global','--prefix',prefix,meta['pnpm']],env=command_env,label='Pinned pnpm installation')
+    # npm also inherits umask 077. Its pnpm launcher and package tree must be
+    # readable/traversable by the service user, including on an existing runtime.
+    for path in [prefix,*prefix.rglob('*')]:
+        if not path.is_symlink(): path.chmod(0o755 if path.is_dir() or path.stat().st_mode&0o111 else 0o644)
     return prefix,command_env
 
 def target_caddy_config(host,source_ip,port):

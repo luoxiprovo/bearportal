@@ -43,11 +43,24 @@ class Files(Base):
         key.parent.mkdir(parents=True);key.touch()
         stage=self.root/'stage';stage.mkdir(mode=0o700)
         def download(url,path):Path(path).write_text('fixture')
+        launcher=runtime/'lib/node_modules/pnpm/bin/pnpm.cjs'
+        def run(args,**kwargs):
+            if kwargs.get('label')=='Pinned pnpm installation':
+                launcher.parent.mkdir(parents=True)
+                launcher.write_text('#!/usr/bin/env node\n')
+                launcher.chmod(0o700)
+                (launcher.parent/'dependency.cjs').write_text('fixture')
+                (runtime/'bin/pnpm').symlink_to('../lib/node_modules/pnpm/bin/pnpm.cjs')
         old_umask=os.umask(0o077)
         try:
-            with patch.object(m,'Path',side_effect=host_path),patch.object(m,'run'),patch.object(m,'download',side_effect=download),patch.object(m,'atomic_write'),patch('platform.machine',return_value='x86_64'):
+            with patch.object(m,'Path',side_effect=host_path),patch.object(m,'run',side_effect=run),patch.object(m,'download',side_effect=download),patch.object(m,'atomic_write'),patch('platform.machine',return_value='x86_64'):
                 m.ensure_target_tools(stage,dict(node_version='v22.0.0',pnpm='pnpm@10.15.0'))
             self.assertEqual(runtime.parent.stat().st_mode&0o777,0o755)
+            self.assertEqual(launcher.stat().st_mode&0o777,0o755)
+            self.assertTrue((runtime/'bin/pnpm').is_symlink())
+            self.assertEqual((launcher.parent/'dependency.cjs').stat().st_mode&0o777,0o644)
+            for directory in [runtime/'lib',runtime/'lib/node_modules',launcher.parent.parent,launcher.parent]:
+                self.assertEqual(directory.stat().st_mode&0o777,0o755)
             self.assertEqual(stage.stat().st_mode&0o777,0o700)
         finally:os.umask(old_umask)
 
