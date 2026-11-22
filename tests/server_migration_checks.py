@@ -27,6 +27,15 @@ class Base(unittest.TestCase):
         return stage
 
 class Files(Base):
+    def test_configure_target_uses_application_env_after_caddy_setup(self):
+        stage=self.stage();root=self.root/'application';runtime=self.root/'runtime'
+        with patch.object(m,'private_dir',side_effect=Path),patch.object(m,'atomic_write'),patch.object(m,'copy_private'),patch.object(m,'chown_tree'),patch.object(m,'target_env',return_value={'PORT':'8088'}),patch.object(m,'run')as run,patch.object(m,'SSH_DIR',self.root/'ssh'),patch.object(m,'CADDY_DATA',self.root/'caddy/data'):
+            m.configure_target(stage,root,dict(hostname='app.example',source_ip='8.8.8.8'),{},'bearportal',runtime,{})
+        node_commands=[call.args[0] for call in run.call_args_list if call.kwargs.get('label') in ('Pending database migrations','Restored encrypted-credential verification')]
+        self.assertEqual(len(node_commands),2)
+        for command in node_commands:
+            self.assertIn('--env-file='+str(root/'.data/trial/env'),command)
+
     def test_runtime_parent_is_accessible_when_resuming_private_install(self):
         # Exercise prerequisite setup without apt, network or host mutations.
         sandbox=self.root/'host'

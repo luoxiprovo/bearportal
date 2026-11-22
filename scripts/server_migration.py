@@ -640,8 +640,8 @@ def configure_target(stage,root,meta,passwords,user,runtime,command_env):
     chown_tree(root/'.data',user);chown_tree(SSH_DIR,user);chown_tree('/var/lib/bearportal/work',user)
     if not (SSH_DIR/'id_ed25519').exists():
         run(['ssh-keygen','-t','ed25519','-N','','-f',SSH_DIR/'id_ed25519'],label='Initial SSH key creation');chown_tree(SSH_DIR,user)
-    for directory in (CADDY_DATA.parent.parent,CADDY_DATA.parent,CADDY_DATA):
-        private_dir(directory);chown_tree(directory,'caddy')
+    for caddy_directory in (CADDY_DATA.parent.parent,CADDY_DATA.parent,CADDY_DATA):
+        private_dir(caddy_directory);chown_tree(caddy_directory,'caddy')
     for path in (Path(stage)/'tls').rglob('*'):
         if path.is_file(): copy_private(path,CADDY_DATA/path.relative_to(Path(stage)/'tls'))
     chown_tree(CADDY_DATA,'caddy')
