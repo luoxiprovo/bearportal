@@ -4,6 +4,7 @@ These procedures describe the current code. They do not imply that every lifecyc
 
 | Topic | Runbook |
 |---|---|
+| Fresh checkout: public test, production, local development and agent handoff | [Agent guide](../../AGENT_GUIDE.md) |
 | Local startup and adapters | [local-setup.md](local-setup.md) |
 | Clear development data, optionally including Google Identity users | [test-reset.md](test-reset.md) |
 | Move production to a new server | [server-migration.md](server-migration.md) |

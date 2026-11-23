@@ -4,6 +4,8 @@ BearPortal installs Bearmail on operator-prepared servers and manages customer s
 
 The code is authoritative. [SPEC.md](SPEC.md) describes the current implementation and its limits.
 
+New agents and fresh servers: start with the [agent setup and operations guide](AGENT_GUIDE.md). It separates public test, production, local development and migration, including the credentials and infrastructure absent from a GitHub clone.
+
 ## Accounts and service URLs
 
 | Service | Purpose | Default address |
@@ -36,7 +38,7 @@ The customer can close the browser during setup. Known retryable failures contin
 
 Customers subscribe through Stripe Checkout before installing Bearmail: the first calendar month is free, then **$20 USD per month plus applicable tax**. A payment method is required. Cancel during the free month to avoid the first charge. Cancellation stops future billing and creates an operator task to manually release server and Brevo resources. Payment failures block new installation. Stripe credentials are required to enable Checkout; the installation gate remains closed until a subscription is confirmed.
 
-Start in Stripe test mode using the [billing setup guide](docs/runbooks/billing.md) and the [bearos.si integration plan](docs/runbooks/stripe-integration-plan.md). Run `pnpm trial:migrate` before starting updated code.
+Start in Stripe test mode using the [agent guide](AGENT_GUIDE.md) and the [billing setup guide](docs/runbooks/billing.md). Apply pending database migrations before starting updated code; public deployments use the service environment, while `pnpm trial:migrate` is for local development.
 
 ## Operator inventory
 
@@ -56,6 +58,8 @@ pnpm inventory brevo list
 See [inventory management](docs/runbooks/inventory.md) and the templates in [examples/inventory](examples/inventory).
 
 ## Run and validate
+
+The following sequence is for private local development after PostgreSQL roles and the database have been created. Public test and production deployments follow [AGENT_GUIDE.md](AGENT_GUIDE.md).
 
 ```sh
 pnpm install --frozen-lockfile
