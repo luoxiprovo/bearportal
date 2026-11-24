@@ -492,8 +492,9 @@ export function registerOnboarding(
       );
       await inventory.withSystem("inventory_worker", async (db) => {
         await inventory.setActor(db, "platform_administrator");
-        await db.query(
-          `UPDATE onboarding_requests SET state=$2,last_error_code=$3,lease_expires_at=NULL,next_attempt_at=now()+interval '60 seconds',updated_at=now() WHERE organization_id=$1`,
+        const updated = await db.query(
+          `UPDATE onboarding_requests SET state=$2,last_error_code=$3,lease_expires_at=NULL,next_attempt_at=now()+interval '60 seconds',updated_at=now()
+           WHERE organization_id=$1 AND state='installing' RETURNING organization_id`,
           [
             prepared.item.organization_id,
             storageFailure ? "queued" : "attention",
@@ -502,7 +503,7 @@ export function registerOnboarding(
               : "INSTALLATION_REVIEW_REQUIRED",
           ],
         );
-        if (!storageFailure)
+        if (updated.rows.length && !storageFailure)
           await recordReview(
             db,
             prepared.item.organization_id,
