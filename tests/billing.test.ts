@@ -530,6 +530,10 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
       (await request("POST", "/portal/billing/cancel", {})).statusCode,
       400,
     );
+    const oldDeployment = randomUUID(), oldMailbox = randomUUID();
+    await query(`INSERT INTO deployments(id,organization_id,lifecycle_state) VALUES(${q(oldDeployment)},${q(org)},'active');
+      INSERT INTO mailboxes(id,organization_id,deployment_id,local_part,address,kind,state)
+      VALUES(${q(oldMailbox)},${q(org)},${q(oldDeployment)},'hello','hello@company.site','customer','active')`);
     const canceled = await request("POST", "/portal/billing/cancel", {
       confirm: "1",
     });
@@ -568,6 +572,9 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
     assert.match(operator.body, /billing@example.org/);
     assert.match(operator.body, /Stop the mail service/);
     assert.match(operator.body, /8\.8\.4\.4/);
+    assert.match(operator.body, /data-state="canceled_by_users"/);
+    assert.match((await request("GET", "/operator?tab=brevo", undefined, adminToken)).body,
+      /data-state="canceled_by_users"/);
     assert.deepEqual(
       await query(`SELECT state FROM servers WHERE id=${q(assignedServer)}`),
       [["assigned"]],
@@ -590,9 +597,19 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
       adminToken,
     );
     assert.equal(blockedCleanup.statusCode, 409, blockedCleanup.body);
-    await query(
-      `UPDATE server_assignments SET released_at=now() WHERE organization_id=${q(org)}; UPDATE relay_assignments SET released_at=now() WHERE organization_id=${q(org)}`,
-    );
+    for (const [type, id] of [["servers", assignedServer], ["brevo", assignedRelay]]) {
+      const removal = await request("POST", `/operator/inventory/${type}/${id}/remove`,
+        { expectedVersion: "1", confirm: "1", csrf: "1", idempotencyKey: randomUUID() }, adminToken);
+      assert.equal(removal.statusCode, 303, removal.body);
+    }
+    assert.deepEqual(await query(
+      `SELECT s.state,r.archived_at IS NOT NULL FROM servers s, relay_connections r
+       WHERE s.id=${q(assignedServer)} AND r.id=${q(assignedRelay)}`,
+    ), [["retired", "t"]]);
+    const users = await request("GET", "/operator?tab=users", undefined, adminToken);
+    assert.match(users.body, /Previous Brevo accounts/);
+    assert.match(users.body, /b-billing · billing-brevo@example.org/);
+    assert.match(users.body, /s-billing · 8\.8\.4\.4/);
     const acknowledged = await request(
       "POST",
       cleanupUrl,
@@ -626,6 +643,32 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
       ),
       [["0"]],
     );
+    assert.match((await request("GET", "/portal")).body, /Resubscribe/);
+    const secondCheckout = await checkout();
+    assert.equal(secondCheckout.statusCode, 200, secondCheckout.body);
+    assert.equal(customerCreates, 1);
+    assert.equal(checkoutParams?.subscription_data?.trial_end, undefined);
+    assert.equal((await webhook("evt_previous_subscription")).statusCode, 200);
+    assert.deepEqual(await query(
+      `SELECT status FROM billing_subscriptions WHERE organization_id=${q(org)};
+       SELECT subscription_id,snapshot->>'status' FROM billing_subscription_history WHERE organization_id=${q(org)}`,
+    ), [["pending"], ["sub_local", "canceled"]]);
+    sub = { ...sub, id: "sub_returning", status: "active", trial_end: null };
+    const reactivated = await webhook("evt_resubscribed");
+    assert.equal(reactivated.statusCode, 200, reactivated.body);
+    const returning = await request("GET", "/portal");
+    assert.match(returning.body, /Your subscription is active/);
+    assert.match(returning.body, /company.site/);
+    assert.match(returning.body, /action="\/portal\/dns-credential"/);
+    const newDeployment = randomUUID();
+    await query(`INSERT INTO deployments(id,organization_id) VALUES(${q(newDeployment)},${q(org)});
+      INSERT INTO mailboxes(id,organization_id,deployment_id,local_part,address,kind,state)
+      VALUES(${q(randomUUID())},${q(org)},${q(newDeployment)},'hello','hello@company.site','customer','pending')`);
+    assert.deepEqual(await query(
+      `SELECT d.lifecycle_state,m.archived_at IS NOT NULL FROM deployments d JOIN mailboxes m ON m.deployment_id=d.id
+       WHERE m.id=${q(oldMailbox)}`,
+    ), [["deleted", "t"]]);
+
     // Prices and quantities are checked against server configuration, never browser input.
     const invalid = {
       ...sub,
