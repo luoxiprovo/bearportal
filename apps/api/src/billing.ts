@@ -85,6 +85,8 @@ export type BillingView = {
   accessUntil: string | null;
   cleanupRequired: boolean;
   trialAvailable: boolean;
+  canResubscribe?: boolean;
+  cancellationScheduled?: boolean;
   invoiceIssue?: string | null;
 };
 export async function billingView(
@@ -107,7 +109,9 @@ export async function billingView(
   return {
     invoiceIssue: row?.invoice_issue_code ?? null,
     trialAvailable: !owner?.billing_trial_used_at,
-    status: row?.status ?? "none",
+    status: row?.cancel_requested_at ? "canceled" : row?.status ?? "none",
+    canResubscribe: row?.status === "canceled" && !row.cleanup_required,
+    cancellationScheduled: Boolean(row?.cancel_requested_at && row.status !== "canceled"),
     entitled: Boolean(
       row &&
       ["trialing", "active"].includes(row.status) &&
@@ -226,7 +230,8 @@ export function registerBilling(
         "BILLING_MISMATCH",
         "The subscription does not match this account.",
       );
-    const { status, until } = subscriptionAccess(sub, config!.priceId);
+    const access = subscriptionAccess(sub, config!.priceId);
+    const status = sub.status === "canceled" ? "canceled" : access.status;
     const invoice =
       sub.latest_invoice && typeof sub.latest_invoice !== "string"
         ? sub.latest_invoice
@@ -264,7 +269,7 @@ export function registerBilling(
         sub.id,
         status,
         sub.trial_end,
-        until,
+        access.until,
         canceled,
         invoiceIssue,
       ],
@@ -275,14 +280,40 @@ export function registerBilling(
     );
     if (canceled && !row.cancel_requested_at) {
       await db.query(
-        `INSERT INTO required_actions(id,scope,organization_id,audience,code,instructions,state)
-        VALUES($1,'tenant',$2,'operator','billing.manual_release','Subscription canceled. Manually stop the tenant service and release its server and Brevo account through the reviewed cleanup workflow. Preserve tenant data until retention and cleanup are complete.','open') ON CONFLICT DO NOTHING`,
-        [randomUUID(), organizationId],
-      );
-      await db.query(
-        "UPDATE onboarding_requests SET state='attention',last_error_code='SUBSCRIPTION_CANCELED',updated_at=now() WHERE organization_id=$1 AND state <> 'installed'",
+        "UPDATE onboarding_requests SET state='attention',last_error_code='SUBSCRIPTION_CANCELED',updated_at=now() WHERE organization_id=$1",
         [organizationId],
       );
+      await db.query(
+        `UPDATE allocation_requests SET state='cancelled',cancelled_at=now(),version=version+1,updated_at=now()
+         WHERE organization_id=$1 AND state <> 'cancelled'`,
+        [organizationId],
+      );
+      await db.query(
+        `UPDATE server_assignments a SET inventory_label=s.label,inventory_address=s.public_ipv4
+         FROM servers s WHERE a.server_id=s.id AND a.organization_id=$1 AND a.released_at IS NULL`,
+        [organizationId],
+      );
+      await db.query(
+        `UPDATE relay_assignments a SET inventory_label=r.label,inventory_account=r.provider_account_id
+         FROM relay_connections r WHERE a.relay_connection_id=r.id AND a.organization_id=$1 AND a.released_at IS NULL`,
+        [organizationId],
+      );
+      const resources = await db.query(
+        `SELECT 1 WHERE EXISTS(SELECT 1 FROM server_assignments WHERE organization_id=$1 AND released_at IS NULL)
+           OR EXISTS(SELECT 1 FROM relay_assignments WHERE organization_id=$1 AND released_at IS NULL)
+           OR EXISTS(SELECT 1 FROM deployments WHERE organization_id=$1 AND lifecycle_state <> 'deleted')
+           OR EXISTS(SELECT 1 FROM recovery_bindings WHERE organization_id=$1 AND state='pending')`,
+        [organizationId],
+      );
+      if (resources.rows.length) {
+        await db.query(
+          `INSERT INTO required_actions(id,scope,organization_id,audience,code,instructions,state)
+           VALUES($1,'tenant',$2,'operator','billing.manual_release','Subscription canceled. Stop the mail service and follow retention requirements before removing the server and Brevo account from inventory.','open') ON CONFLICT DO NOTHING`,
+          [randomUUID(), organizationId],
+        );
+      } else {
+        await db.query("UPDATE billing_subscriptions SET cleanup_required=false WHERE organization_id=$1", [organizationId]);
+      }
     }
     if (
       ["active", "trialing"].includes(status) &&
@@ -294,6 +325,29 @@ export function registerBilling(
         [organizationId],
       );
     }
+  }
+  async function closeCanceledSetup(db: Queryable, organizationId: string) {
+    await db.query(
+      `UPDATE onboarding_requests SET state='attention',last_error_code='SUBSCRIPTION_CANCELED',updated_at=now()
+       WHERE organization_id=$1 AND last_error_code IS DISTINCT FROM 'SUBSCRIPTION_CANCELED'`,
+      [organizationId],
+    );
+    await db.query(
+      `UPDATE allocation_requests SET state='cancelled',cancelled_at=now(),version=version+1,updated_at=now()
+       WHERE organization_id=$1 AND state <> 'cancelled'`,
+      [organizationId],
+    );
+    await db.query(
+      `UPDATE deployments SET lifecycle_state='deleted',version=version+1,updated_at=now()
+       WHERE organization_id=$1 AND lifecycle_state <> 'deleted'`,
+      [organizationId],
+    );
+    await db.query(
+      `UPDATE mailboxes m SET archived_at=now(),version=m.version+1,updated_at=now()
+       FROM deployments d WHERE d.id=m.deployment_id AND d.organization_id=$1
+         AND d.lifecycle_state='deleted' AND m.archived_at IS NULL`,
+      [organizationId],
+    );
   }
   async function system<T>(work: (db: Queryable) => Promise<T>) {
     return ctx.withSystem("inventory_worker", async (db) => {
@@ -344,11 +398,23 @@ export function registerBilling(
           [owner.id],
         )
       ).rows[0];
-      if (
-        row.subscription_id ||
-        row.cancel_requested_at ||
-        row.cleanup_required
-      )
+      if (row.subscription_id && row.status === "canceled" && !row.cleanup_required) {
+        await closeCanceledSetup(db, owner.id);
+        await db.query(
+          `INSERT INTO billing_subscription_history(subscription_id,organization_id,snapshot)
+           SELECT subscription_id,organization_id,to_jsonb(b) FROM billing_subscriptions b WHERE organization_id=$1`,
+          [owner.id],
+        );
+        await db.query(
+          `UPDATE billing_subscriptions SET subscription_id=NULL,checkout_id=NULL,status='pending',
+           checkout_started_at=now(),checkout_attempt=checkout_attempt+1,trial_ends_at=NULL,
+           access_until=NULL,cancel_requested_at=NULL,invoice_issue_code=NULL,updated_at=now()
+           WHERE organization_id=$1`,
+          [owner.id],
+        );
+        return null;
+      }
+      if (row.subscription_id || row.cancel_requested_at || row.cleanup_required)
         throw new HttpError(
           409,
           "SUBSCRIPTION_EXISTS",
@@ -656,7 +722,7 @@ export function registerBilling(
           "This subscription has not been canceled.",
         );
       const assigned = await db.query(
-        "SELECT id FROM server_assignments WHERE organization_id=$1 AND released_at IS NULL UNION ALL SELECT id FROM relay_assignments WHERE organization_id=$1 AND released_at IS NULL",
+        "SELECT id FROM server_assignments WHERE organization_id=$1 AND released_at IS NULL UNION ALL SELECT id FROM relay_assignments WHERE organization_id=$1 AND released_at IS NULL UNION ALL SELECT id FROM recovery_bindings WHERE organization_id=$1 AND state='pending'",
         [id],
       );
       if (assigned.rows.length)
@@ -665,6 +731,7 @@ export function registerBilling(
           "RESOURCES_STILL_ASSIGNED",
           "Release the server and Brevo assignments through the reviewed cleanup workflow first.",
         );
+      await closeCanceledSetup(db, id);
       await db.query(
         "UPDATE required_actions SET state='resolved',resolved_by=$2,resolved_at=now(),updated_at=now(),version=version+1 WHERE organization_id=$1 AND code='billing.manual_release' AND state='open'",
         [id, actorId],
@@ -756,6 +823,11 @@ export function registerBilling(
               "BILLING_ACCOUNT_PENDING",
               "The billing account is not available yet. Retry this event.",
             );
+          const historical = await db.query(
+            "SELECT 1 FROM billing_subscription_history WHERE subscription_id=$1 AND organization_id=$2",
+            [subscriptionId, row.organization_id],
+          );
+          if (historical.rows[0]) return;
           await sync(
             db,
             row.organization_id,
