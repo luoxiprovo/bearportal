@@ -1289,7 +1289,7 @@ async function customerView(db: Db, organizationId: string, billingRequired = fa
   return {
     billing: billingRequired ? await billingView(db, organizationId, billingConfigured) : undefined,
     adminCredentialsAvailable:row?.admin_credentials_available===true,
-    onboardingState: onboarding?.state ?? null,
+    onboardingState: onboarding?.last_error_code === "SUBSCRIPTION_CANCELED" ? null : onboarding?.state ?? null,
     missingResource: onboarding?.missing_resource ?? null,
     onboardingError: onboarding?.last_error_code ?? null,
     organizationId,
@@ -1376,7 +1376,8 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
   }>(
     `SELECT s.id, s.version, o.name AS owner_name,
             EXISTS(SELECT 1 FROM recovery_bindings r WHERE r.replacement_server_id=s.id AND r.state='pending') AS recovery_reserved,
-            s.state, s.label, host(s.public_ipv4) AS public_ipv4, a.organization_id AS owner_id,
+            CASE WHEN s.state <> 'retired' AND b.cancel_requested_at IS NOT NULL THEN 'canceled_by_users' ELSE s.state END AS state,
+            s.label, host(s.public_ipv4) AS public_ipv4, a.organization_id AS owner_id,
             s.operator_contact, s.provider_reference, s.profile_code, s.last_heartbeat_at, s.validated_at,
             s.tenant_tainted_at IS NOT NULL AS tainted,
             (SELECT h.state FROM host_identities h WHERE h.server_id = s.id AND h.state <> 'revoked' ORDER BY h.created_at DESC LIMIT 1) AS identity_state,
@@ -1394,6 +1395,7 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
      FROM servers s
      LEFT JOIN server_assignments a ON a.server_id = s.id AND a.released_at IS NULL
      LEFT JOIN organizations o ON o.id=a.organization_id
+     LEFT JOIN billing_subscriptions b ON b.organization_id=a.organization_id
      ORDER BY s.created_at`,
   );
   const actions = await db.query<{ code: string }>(
@@ -1410,7 +1412,11 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
   const relays = await db.query<{ id: string; version: number; archived_at:Date|null; owner_name:string|null; label: string; provider_account_id: string; smtp_login: string; daily_limit: number; state: string; assigned: boolean }>(
     `SELECT r.id,r.version,r.archived_at,
             (SELECT o.name FROM relay_assignments a JOIN organizations o ON o.id=a.organization_id WHERE a.relay_connection_id=r.id AND a.released_at IS NULL LIMIT 1) AS owner_name,
-            r.label, r.provider_account_id, r.smtp_login, r.daily_limit, r.state,
+            r.label, r.provider_account_id, r.smtp_login, r.daily_limit,
+            CASE WHEN r.archived_at IS NULL AND EXISTS (
+              SELECT 1 FROM relay_assignments a JOIN billing_subscriptions b ON b.organization_id=a.organization_id
+              WHERE a.relay_connection_id=r.id AND a.released_at IS NULL AND b.cancel_requested_at IS NOT NULL
+            ) THEN 'canceled_by_users' ELSE r.state END AS state,
             EXISTS (SELECT 1 FROM relay_assignments a WHERE a.relay_connection_id = r.id AND a.released_at IS NULL) AS assigned
      FROM relay_connections r
      ORDER BY r.created_at`,
@@ -1458,11 +1464,18 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
     domains:string|null; server_id:string|null; server_label:string|null; public_ipv4:string|null;
     relay_id:string|null; relay_label:string|null; relay_account:string|null;
     lifecycle_state:string|null; onboarding_state:string|null;
+    server_history:string|null; relay_history:string|null;
   }>(`SELECT u.id,u.verified_email AS email,u.email_verified,u.status,u.created_at,
       o.id AS organization_id,o.name AS organization_name,o.status AS organization_status,
       (SELECT string_agg(d.normalized_name, ', ' ORDER BY d.normalized_name) FROM domains d WHERE d.organization_id=o.id AND d.state <> 'retired') AS domains,
       s.id AS server_id,s.label AS server_label,host(s.public_ipv4) AS public_ipv4,
       r.id AS relay_id,r.label AS relay_label,r.provider_account_id AS relay_account,
+      (SELECT string_agg(concat_ws(' · ',coalesce(a.inventory_label,h.label),host(coalesce(a.inventory_address,h.public_ipv4)),a.released_at::date), ', ' ORDER BY a.released_at DESC)
+       FROM server_assignments a JOIN servers h ON h.id=a.server_id
+       WHERE a.organization_id=o.id AND a.released_at IS NOT NULL) AS server_history,
+      (SELECT string_agg(concat_ws(' · ',coalesce(a.inventory_label,h.label),coalesce(a.inventory_account,h.provider_account_id),a.released_at::date), ', ' ORDER BY a.released_at DESC)
+       FROM relay_assignments a JOIN relay_connections h ON h.id=a.relay_connection_id
+       WHERE a.organization_id=o.id AND a.released_at IS NOT NULL) AS relay_history,
       (SELECT d.lifecycle_state FROM deployments d WHERE d.organization_id=o.id ORDER BY d.created_at DESC LIMIT 1) AS lifecycle_state,
       (SELECT q.state FROM onboarding_requests q WHERE q.organization_id=o.id ORDER BY q.created_at DESC LIMIT 1) AS onboarding_state
     FROM users u
@@ -1487,7 +1500,7 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
     canManageServers:roles.includes("platform_administrator")||roles.includes("infrastructure_operator"),
     canManageBrevo:roles.includes("platform_administrator"),
     canViewBrevo:roles.includes("platform_administrator")||roles.includes("infrastructure_operator"),
-    users:users.rows.map(row=>({id:row.id,email:row.email,emailVerified:row.email_verified,status:row.status,createdAt:isoTime(row.created_at),organizationId:row.organization_id,organizationName:row.organization_name,organizationStatus:row.organization_status,domains:row.domains,serverId:row.server_id,serverLabel:row.server_label,publicIpv4:row.public_ipv4,relayId:row.relay_id,relayLabel:row.relay_label,relayAccount:row.relay_account,lifecycleState:row.lifecycle_state,onboardingState:row.onboarding_state})),
+    users:users.rows.map(row=>({id:row.id,email:row.email,emailVerified:row.email_verified,status:row.status,createdAt:isoTime(row.created_at),organizationId:row.organization_id,organizationName:row.organization_name,organizationStatus:row.organization_status,domains:row.domains,serverId:row.server_id,serverLabel:row.server_label,publicIpv4:row.public_ipv4,relayId:row.relay_id,relayLabel:row.relay_label,relayAccount:row.relay_account,serverHistory:row.server_history,relayHistory:row.relay_history,lifecycleState:row.lifecycle_state,onboardingState:row.onboarding_state})),
     counts: counts.rows.map((row) => ({ state: row.state, count: Number(row.count) })),
     servers: servers.rows.map((server) => ({
       id: server.id,
