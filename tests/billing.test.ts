@@ -216,6 +216,12 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
     stripe,
     lookupNameservers: async () => ["ns1.name.com", "ns2.name.com"],
     onboardingIntervalMs: 0,
+    schedulerToken: "billing-test-scheduler",
+    operatorBrevo: {
+      requestDomain: async () => {
+        throw new Error("Stop at the provider boundary after allocation");
+      },
+    },
   });
   const request = (
     method: "GET" | "POST",
@@ -668,6 +674,40 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
       `SELECT d.lifecycle_state,m.archived_at IS NOT NULL FROM deployments d JOIN mailboxes m ON m.deployment_id=d.id
        WHERE m.id=${q(oldMailbox)}`,
     ), [["deleted", "t"]]);
+
+    const freshServer = randomUUID();
+    await query(`INSERT INTO servers(id,label,public_ipv4,profile_code,operator_contact,state,validated_at,available_since,readiness_report)
+      VALUES(${q(freshServer)},'returning-server','8.8.8.8','e2-micro','ops@example.org','available',now(),now(),'{"source":"ssh"}')`);
+    const freshBrevo = await request("POST", "/operator/brevo-account", {
+      loginEmail: "returning-brevo@example.org",
+      apiKey: "private-api-test-key",
+      smtpLogin: "returning-smtp",
+      smtpKey: "private-smtp-test-key",
+      dailyLimit: "300",
+    }, adminToken);
+    assert.equal(freshBrevo.statusCode, 200, freshBrevo.body);
+    const resumeSetup = await request("POST", "/portal/dns-credential", {
+      csrf: "1",
+      onboarding: "1",
+      deployConsent: "1",
+      domain: "company.site",
+      dnsUsername: "test-dns-user",
+      dnsToken: "test-dns-api-token",
+    });
+    assert.equal(resumeSetup.statusCode, 303, resumeSetup.body);
+    await query(`UPDATE onboarding_requests SET next_attempt_at=now() WHERE organization_id=${q(org)}`);
+    const allocation = await app.inject({
+      method: "POST",
+      url: "/internal/onboarding/run",
+      headers: { "x-bearportal-scheduler": "billing-test-scheduler" },
+      payload: {},
+    });
+    assert.equal(allocation.statusCode, 200, allocation.body);
+    assert.deepEqual(await query(
+      `SELECT server_id FROM server_assignments WHERE organization_id=${q(org)} AND released_at IS NULL;
+       SELECT r.provider_account_id FROM relay_assignments a JOIN relay_connections r ON a.relay_connection_id=r.id
+       WHERE a.organization_id=${q(org)} AND a.released_at IS NULL`,
+    ), [[freshServer], ["returning-brevo@example.org"]]);
 
     // Prices and quantities are checked against server configuration, never browser input.
     const invalid = {
