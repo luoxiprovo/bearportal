@@ -41,6 +41,8 @@ test("setup milestones reflect the saved stage and do not promise readiness befo
   assert.doesNotMatch(failed, /class="milestone-number working-spinner"/);
   assert.doesNotMatch(failed, /Your account<\/strong>|Provider connection<\/strong>/);
   const pending = renderCustomerPortal({ ...connected, onboardingState: "installed", installerStatus: "tls_pending" });
+  assert.match(pending, /class="waiting-status">Waiting for HTTPS/);
+  assert.doesNotMatch(pending, /Retrying/);
   assert.match(pending, /location.reload/);
   assert.doesNotMatch(pending, /Your setup is complete/);
   const ready = renderCustomerPortal({ ...connected, onboardingState: "installed", installerStatus: "succeeded" });
@@ -60,7 +62,10 @@ test("Brevo verification animates during work and automatic waits while preservi
     assert.match(html, /Step 1 of 2/);
     assert.match(html, /class="milestone-number working-spinner" aria-hidden="true"><\/span><div><strong>Verifying Brevo domain/);
     if (state.onboardingState === "queued" && !state.onboardingError) assert.match(html, /<small>Working<\/small>/);
-    else if (state.onboardingError === "DNS_PROPAGATION") assert.match(html, /class="waiting-status">Waiting for DNS/);
+    else if (state.onboardingError === "DNS_PROPAGATION") {
+      assert.match(html, /class="waiting-status">Waiting for DNS/);
+      assert.doesNotMatch(html, /Error code|DNS_PROPAGATION/);
+    }
     else assert.match(html, /class="waiting-status">Retrying/);
     assert.match(html, /class="setup-timing">DNS updates can take minutes to hours/);
   }

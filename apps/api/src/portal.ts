@@ -580,11 +580,17 @@ function renderSetupProgress(view: CustomerPortalView): string {
   const { current, complete, note, running } = setupProgress(view);
   const labels = ["Verifying Brevo domain", "Installing Bearmail"];
   const animating = !complete && view.onboardingState !== "attention" && (running || current === 0);
-  const status = complete ? "Complete" : view.onboardingState === "attention" ? "Paused · needs attention" : running ? "Working" : view.onboardingError === "DNS_PROPAGATION" ? "Waiting for DNS" : "Retrying";
+  const waitingForDns = view.onboardingError === "DNS_PROPAGATION";
+  const status = complete ? "Complete"
+    : view.onboardingState === "attention" ? "Paused · needs attention"
+    : view.installerStatus === "tls_pending" ? "Waiting for HTTPS"
+    : running ? "Working"
+    : waitingForDns ? "Waiting for DNS"
+    : "Retrying";
   const statusMarkup = !["Complete", "Working", "Paused · needs attention"].includes(status) ? `<span class="waiting-status">${status}<span aria-hidden="true">…</span></span>` : status;
   const timing = !complete && view.onboardingState !== "attention" ? '<p class="setup-timing">DNS updates can take minutes to hours.</p>' : "";
   const value = complete ? 2 : current;
-  const code = view.onboardingError;
+  const code = waitingForDns ? null : view.onboardingError;
   return `<section class="setup-progress" aria-labelledby="setup-progress-title"><div class="milestone-heading"><h2 id="setup-progress-title">${complete ? "Your setup is complete" : `Step ${current + 1} of 2`}</h2></div>${timing}<div class="backend-progress" role="progressbar" aria-label="Backend setup progress" aria-valuemin="0" aria-valuemax="2" aria-valuenow="${value}" aria-valuetext="${escapeHtml(complete ? "Both backend stages complete" : `${labels[current]}: ${status}`)}"><span style="width:${value * 50}%"></span></div><p role="${view.onboardingState === "attention" ? "alert" : "status"}">${escapeHtml(note)}${code ? `<br><small>Error code: <code>${escapeHtml(code)}</code></small>` : ""}</p><ol class="milestones" aria-label="Setup progress">${labels.map((label, i) => {
     const done = complete || i < current;
     const active = !complete && i === current;
