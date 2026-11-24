@@ -202,8 +202,20 @@ export function registerOperatorInventory(
             "VERSION_CONFLICT",
             "This server changed. Refresh before removing it.",
           );
-        await ensureUnusedServer(db, id, row.tainted);
-        if (row.state === "reserved" || row.state === "assigned")
+        const canceled = await db.query(
+          `UPDATE server_assignments a SET released_at=now(),
+             inventory_label=coalesce(a.inventory_label,s.label),
+             inventory_address=coalesce(a.inventory_address,s.public_ipv4)
+           FROM billing_subscriptions b, servers s
+           WHERE a.server_id=$1 AND a.released_at IS NULL AND s.id=a.server_id
+             AND b.organization_id=a.organization_id AND b.cancel_requested_at IS NOT NULL
+           RETURNING a.id`,
+          [id],
+        );
+        const canceledAssignmentReleased = canceled.rows.length > 0;
+        // The removal confirmation attests to external cleanup for canceled assignments.
+        await ensureUnusedServer(db, id, row.tainted && !canceledAssignmentReleased);
+        if (!canceledAssignmentReleased && (row.state === "reserved" || row.state === "assigned"))
           throw new HttpError(
             409,
             "RESOURCE_IN_USE",
@@ -219,6 +231,7 @@ export function registerOperatorInventory(
         );
         await ctx.audit(db, request, actor.userId, null, "server.remove", id, {
           previousState: row.state,
+          canceledAssignmentReleased,
           inventoryOnly: true,
         });
         return {
@@ -398,11 +411,22 @@ export function registerOperatorInventory(
             "VERSION_CONFLICT",
             "This account changed. Refresh before removing it.",
           );
+        const canceled = await db.query(
+          `UPDATE relay_assignments a SET released_at=now(),
+             inventory_label=coalesce(a.inventory_label,r.label),
+             inventory_account=coalesce(a.inventory_account,r.provider_account_id)
+           FROM billing_subscriptions b, relay_connections r
+           WHERE a.relay_connection_id=$1 AND a.released_at IS NULL AND r.id=a.relay_connection_id
+             AND b.organization_id=a.organization_id AND b.cancel_requested_at IS NOT NULL
+           RETURNING a.id`,
+          [id],
+        );
         const assigned = await db.query(
           "SELECT id FROM relay_assignments WHERE relay_connection_id=$1 AND released_at IS NULL",
           [id],
         );
-        if (assigned.rows[0] || row.state === "assigned")
+        const canceledAssignmentReleased = canceled.rows.length > 0;
+        if (assigned.rows[0] || (row.state === "assigned" && !canceledAssignmentReleased))
           throw new HttpError(
             409,
             "RESOURCE_IN_USE",
@@ -413,6 +437,7 @@ export function registerOperatorInventory(
           [id],
         );
         await ctx.audit(db, request, actor.userId, null, "relay.remove", id, {
+          canceledAssignmentReleased,
           inventoryOnly: true,
         });
         return {
