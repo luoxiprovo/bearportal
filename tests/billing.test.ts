@@ -591,6 +591,10 @@ test("subscription gates installation, checkout is deduplicated, signed webhooks
       ),
       [["assigned"]],
     );
+    const canceledUser = await request("GET", "/operator?tab=users", undefined, adminToken);
+    assert.equal(canceledUser.statusCode, 200, canceledUser.body);
+    assert.match(canceledUser.body, /<td>Canceled by users<\/td>/);
+    assert.match(canceledUser.body, /b-billing/);
     const cleanupUrl = `/operator/billing/${org}/cleanup`;
     assert.equal(
       (await request("POST", cleanupUrl, { confirm: "1" })).statusCode,

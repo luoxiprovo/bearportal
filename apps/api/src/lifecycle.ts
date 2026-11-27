@@ -1463,10 +1463,11 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
     organization_id:string|null; organization_name:string|null; organization_status:string|null;
     domains:string|null; server_id:string|null; server_label:string|null; public_ipv4:string|null;
     relay_id:string|null; relay_label:string|null; relay_account:string|null;
-    lifecycle_state:string|null; onboarding_state:string|null;
+    lifecycle_state:string|null; onboarding_state:string|null; subscription_canceled:boolean;
     server_history:string|null; relay_history:string|null;
   }>(`SELECT u.id,u.verified_email AS email,u.email_verified,u.status,u.created_at,
       o.id AS organization_id,o.name AS organization_name,o.status AS organization_status,
+      (b.cancel_requested_at IS NOT NULL OR coalesce(b.status = 'canceled',false)) AS subscription_canceled,
       (SELECT string_agg(d.normalized_name, ', ' ORDER BY d.normalized_name) FROM domains d WHERE d.organization_id=o.id AND d.state <> 'retired') AS domains,
       s.id AS server_id,s.label AS server_label,host(s.public_ipv4) AS public_ipv4,
       r.id AS relay_id,r.label AS relay_label,r.provider_account_id AS relay_account,
@@ -1477,9 +1478,10 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
        FROM relay_assignments a JOIN relay_connections h ON h.id=a.relay_connection_id
        WHERE a.organization_id=o.id AND a.released_at IS NOT NULL) AS relay_history,
       (SELECT d.lifecycle_state FROM deployments d WHERE d.organization_id=o.id ORDER BY d.created_at DESC LIMIT 1) AS lifecycle_state,
-      (SELECT q.state FROM onboarding_requests q WHERE q.organization_id=o.id ORDER BY q.created_at DESC LIMIT 1) AS onboarding_state
+      (SELECT q.state FROM onboarding_requests q WHERE q.organization_id=o.id AND q.last_error_code IS DISTINCT FROM 'SUBSCRIPTION_CANCELED') AS onboarding_state
     FROM users u
     LEFT JOIN organizations o ON o.owner_user_id=u.id
+    LEFT JOIN billing_subscriptions b ON b.organization_id=o.id
     LEFT JOIN server_assignments sa ON sa.organization_id=o.id AND sa.released_at IS NULL
     LEFT JOIN servers s ON s.id=sa.server_id
     LEFT JOIN relay_assignments ra ON ra.organization_id=o.id AND ra.released_at IS NULL
@@ -1500,7 +1502,7 @@ async function operatorView(db: Db, roles: OperatorRole[]): Promise<OperatorPort
     canManageServers:roles.includes("platform_administrator")||roles.includes("infrastructure_operator"),
     canManageBrevo:roles.includes("platform_administrator"),
     canViewBrevo:roles.includes("platform_administrator")||roles.includes("infrastructure_operator"),
-    users:users.rows.map(row=>({id:row.id,email:row.email,emailVerified:row.email_verified,status:row.status,createdAt:isoTime(row.created_at),organizationId:row.organization_id,organizationName:row.organization_name,organizationStatus:row.organization_status,domains:row.domains,serverId:row.server_id,serverLabel:row.server_label,publicIpv4:row.public_ipv4,relayId:row.relay_id,relayLabel:row.relay_label,relayAccount:row.relay_account,serverHistory:row.server_history,relayHistory:row.relay_history,lifecycleState:row.lifecycle_state,onboardingState:row.onboarding_state})),
+    users:users.rows.map(row=>({id:row.id,email:row.email,emailVerified:row.email_verified,status:row.status,createdAt:isoTime(row.created_at),organizationId:row.organization_id,organizationName:row.organization_name,organizationStatus:row.organization_status,domains:row.domains,serverId:row.server_id,serverLabel:row.server_label,publicIpv4:row.public_ipv4,relayId:row.relay_id,relayLabel:row.relay_label,relayAccount:row.relay_account,serverHistory:row.server_history,relayHistory:row.relay_history,lifecycleState:row.lifecycle_state,onboardingState:row.onboarding_state,subscriptionCanceled:row.subscription_canceled})),
     counts: counts.rows.map((row) => ({ state: row.state, count: Number(row.count) })),
     servers: servers.rows.map((server) => ({
       id: server.id,
